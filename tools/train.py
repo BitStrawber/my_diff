@@ -93,6 +93,12 @@ def parse_args():
         '--auto-scale-lr',
         action='store_true',
         help='enable automatically scaling LR.')
+    parser.add_argument(
+        '--train-mode',
+        type=str,
+        default='both',
+        choices=['both', 'diff', 'det'],
+        help='训练模式选择: both(联合训练), diff(仅训练扩散模型), det(仅训练检测模型)')
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -166,6 +172,13 @@ def main():
                       'in `gpu_ids` now.')
     if args.gpus is None and args.gpu_ids is None:
         cfg.gpu_ids = [args.gpu_id]
+
+    if args.train_mode == 'diff':
+        cfg.custom_hooks[1]['train_modes'] = ['sample']
+        cfg.custom_hooks[1]['num_epoch'] = [12]
+    elif args.train_mode == 'det':
+        cfg.custom_hooks[1]['train_modes'] = ['det']
+        cfg.custom_hooks[1]['num_epoch'] = [12]
 
     # init distributed env first, since logger depends on the dist info.
     if args.launcher == 'none':

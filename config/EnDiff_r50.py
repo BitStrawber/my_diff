@@ -10,7 +10,7 @@ model = dict(
     init_cfg=dict(
         type='Pretrained',
         checkpoint=
-        '/home/xcx/桌面/ddpm/en-diff/work_dirs/EnDiff_r50/epoch_7.pth'
+        '/home/xcx/桌面/ddpm/en-diff/work_dirs/EnDiff_r50/epoch_9.pth'
     ),
     diff_cfg=dict(
         type='EnDiff',
@@ -91,8 +91,8 @@ train_pipeline = [
     dict(type='LoadLqHqImages'),
     dict(type='LoadAnnotations', with_bbox=True),
     dict(
-        type='ResizeLqHqImages', 
-        img_scale=(1333, 800),
+        type='ResizeLqHqImages',
+        img_scale=(1920, 1080),
         keep_ratio=True),
     dict(type='RandomFlip', flip_ratio=0.5),
     dict(type='Normalize', **img_norm_cfg),
@@ -105,7 +105,7 @@ test_pipeline = [
     dict(type='LoadLqHqImages'),
     dict(
         type='MultiScaleFlipAug',
-        img_scale=[(1333, 800)],
+        img_scale=[(1920, 1080)],
         flip=True,
         transforms=[
             dict(type='ResizeLqHqImages', keep_ratio=True),
@@ -123,12 +123,12 @@ data_root = '/home/xcx/桌面/ddpm/en-diff/data/mydata/'
 train_ann = '/home/xcx/桌面/ddpm/en-diff/data/mydata/annotations/instances_train.json'
 test_ann = '/home/xcx/桌面/ddpm/en-diff/data/mydata/annotations/instances_test.json'
 # hq_img_prefix = './data/coco2017/train2017/'
-# data_root = './data/urpc2020/'
+# data_root = './data/urpc2020/ '
 # train_ann = './data/urpc2020/annotations/instances_train.json'
 # test_ann = './data/urpc2020/annotations/instances_test.json'
-classes = ['0', '1', '2', '3', '4']
+classes = ['tiger shark', 'stingray', 'tench', 'electric ray', 'goldfish']
 data = dict(
-    samples_per_gpu=2,
+    samples_per_gpu=1,
     workers_per_gpu=4,
     train=dict(
         type=dataset_type,
@@ -180,6 +180,6 @@ log_config = dict(
 custom_hooks = [
     dict(type='NumClassCheckHook'),
     dict(
-        type='TrainModeControlHook', train_modes=['sample', 'det'], num_epoch=[6, 1])
+        type='TrainModeControlHook', train_modes=['sample', 'det'], num_epoch=[6, 6])
 ]
 fp16 = dict(loss_scale=512.0)

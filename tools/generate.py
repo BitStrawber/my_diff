@@ -1,180 +1,254 @@
-# Copyright (c) OpenMMLab. All rights reserved.
-import argparse  # 用于解析命令行参数
-import copy  # 用于复制对象
-import os  # 用于操作文件和目录
-import os.path as osp  # 用于操作路径
-import time  # 用于获取时间
-import warnings  # 用于处理警告信息
-
-import torch  # 用于深度学习模型的构建和训练
-import mmcv  # MMDetection的依赖库，用于配置管理、日志记录等
-import torch.distributed as dist  # 用于分布式训练
-from mmcv import Config, DictAction  # 用于配置文件的加载和解析
-from mmcv.runner import get_dist_info, init_dist  # 用于分布式训练的初始化和信息获取
-from mmcv.utils import get_git_hash  # 用于获取Git哈希值
-
-from mmdet import __version__  # 用于获取MMDetection的版本信息
-from mmdet.apis import init_random_seed, set_random_seed, train_detector  # 用于初始化随机种子和训练检测器
-from mmdet.datasets import build_dataset  # 用于构建数据集
-from mmdet.models import build_detector  # 用于构建检测模型
-from mmdet.utils import (collect_env, get_device, get_root_logger,  # 用于收集环境信息、获取设备信息和根日志记录器
-                         replace_cfg_vals, setup_multi_processes,  # 用于替换配置值和设置多进程
-                         update_data_root)  # 用于更新数据根目录
-import sys  # 用于系统相关的操作
-sys.path.append('./')  # 将当前目录添加到系统路径中
-from EnDiff import *  # 导入自定义的EnDiff模块
+import os
+import torch
+import mmcv
+import cv2
+import numpy as np
+from mmcv.runner import load_checkpoint
+from mmdet.models import build_detector
+from mmdet.datasets.pipelines import Compose
+from pycocotools.coco import COCO
+from typing import List, Dict, Optional, Tuple
+from tqdm import tqdm  # 导入进度条库
+from EnDiff import *
 
 
-def parse_args():
-    # 定义一个函数用于解析命令行参数
-    parser = argparse.ArgumentParser(description='Train a detector')  # 创建一个参数解析器
-    parser.add_argument('config', help='train config file path')  # 添加一个位置参数，用于指定训练配置文件路径
-    parser.add_argument('--work-dir', help='the dir to save logs and models')  # 添加一个可选参数，用于指定保存日志和模型的目录
-    parser.add_argument('--resume-from', help='the checkpoint file to resume from')  # 添加一个可选参数，用于指定恢复训练的检查点文件
-    parser.add_argument('--auto-resume', action='store_true', help='resume from the latest checkpoint automatically')  # 添加一个可选参数，用于自动恢复最近的检查点
-    parser.add_argument('--no-validate', action='store_true', help='whether not to evaluate the checkpoint during training')  # 添加一个可选参数，用于在训练期间是否不评估检查点
-    group_gpus = parser.add_mutually_exclusive_group()  # 添加一个互斥参数组，用于GPU相关的选项
-    group_gpus.add_argument('--gpus', type=int, help='number of gpus to use (only applicable to non-distributed training)')  # 添加一个可选参数，用于指定使用的GPU数量
-    group_gpus.add_argument('--gpu-ids', type=int, nargs='+', help='ids of gpus to use (only applicable to non-distributed training)')  # 添加一个可选参数，用于指定使用的GPU IDs
-    group_gpus.add_argument('--gpu-id', type=int, default=0, help='id of gpu to use (only applicable to non-distributed training)')  # 添加一个可选参数，用于指定使用的GPU ID，默认为0
-    parser.add_argument('--seed', type=int, default=None, help='random seed')  # 添加一个可选参数，用于指定随机种子
-    parser.add_argument('--diff-seed', action='store_true', help='Whether or not set different seeds for different ranks')  # 添加一个可选参数，用于是否为不同的进程设置不同的种子
-    parser.add_argument('--deterministic', action='store_true', help='whether to set deterministic options for CUDNN backend.')  # 添加一个可选参数，用于是否设置确定性选项以提高可重复性
-    parser.add_argument('--options', nargs='+', action=DictAction, help='override some settings in the used config, the key-value pair in xxx=yyy format will be merged into config file (deprecate), change to --cfg-options instead.')  # 添加一个可选参数，用于覆盖配置文件中的某些设置（已弃用）
-    parser.add_argument('--cfg-options', nargs='+', action=DictAction, help='override some settings in the used config, the key-value pair in xxx=yyy format will be merged into config file. If the value to be overwritten is a list, it should be like key="[a,b]" or key=a,b It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" Note that the quotation marks are necessary and that no white space is allowed.')  # 添加一个可选参数，用于覆盖配置文件中的某些设置
-    parser.add_argument('--launcher', choices=['none', 'pytorch', 'slurm', 'mpi'], default='none', help='job launcher')  # 添加一个可选参数，用于指定作业启动器
-    parser.add_argument('--local_rank', type=int, default=0)  # 添加一个可选参数，用于指定本地进程的排名
-    parser.add_argument('--auto-scale-lr', action='store_true', help='enable automatically scaling LR.')  # 添加一个可选参数，用于是否自动缩放学习率
-    args = parser.parse_args()  # 解析命令行参数
-    if 'LOCAL_RANK' not in os.environ:
-        os.environ['LOCAL_RANK'] = str(args.local_rank)  # 设置环境变量LOCAL_RANK
-
-    if args.options and args.cfg_options:
-        raise ValueError('--options and --cfg-options cannot be both specified, --options is deprecated in favor of --cfg-options')  # 如果同时指定了--options和--cfg-options，则抛出错误
-    if args.options:
-        warnings.warn('--options is deprecated in favor of --cfg-options')  # 如果指定了--options，则发出警告
-        args.cfg_options = args.options
-
-    return args
+# ====== 配置区域 ======
+CONFIG_PATH = '../config/EnDiff_r50.py'
+CHECKPOINT_PATH = '../work_dirs/EnDiff_r50/epoch_1.pth'
+INPUT_DIR = '/home/xcx/桌面/synthetic_dataset/blended_images'
+OUTPUT_DIR = '/home/xcx/桌面/temp'
+ANNOTATION_PATH = '/home/xcx/桌面/synthetic_dataset/annotations/instances_all.json'
 
 
-def main():
-    # 定义主函数
-    args = parse_args()  # 解析命令行参数
+# =====================
 
-    cfg = Config.fromfile(args.config)  # 从配置文件加载配置
+class CocoProcessor:
+    """专业的COCO标注处理器（保持标注原始尺寸）"""
 
-    # replace the ${key} with the value of cfg.key
-    cfg = replace_cfg_vals(cfg)  # 替换配置文件中的变量
+    def __init__(self, annotation_path: str):
+        if not os.path.exists(annotation_path):
+            raise FileNotFoundError(f"COCO annotation file not found: {annotation_path}")
 
-    # update data root according to MMDET_DATASETS
-    update_data_root(cfg)  # 根据MMDET_DATASETS更新数据根目录
+        self.coco = COCO(annotation_path)
+        self._build_filename_index()
+        self._load_categories()
 
-    if args.cfg_options is not None:
-        cfg.merge_from_dict(args.cfg_options)  # 如果指定了--cfg-options，则合并到配置中
+    def _build_filename_index(self):
+        """构建文件名到图像元数据的索引"""
+        self.filename_to_info = {img['file_name']: img for img in self.coco.dataset['images']}
 
-    if args.auto_scale_lr:
-        if 'auto_scale_lr' in cfg and 'enable' in cfg.auto_scale_lr and 'base_batch_size' in cfg.auto_scale_lr:
-            cfg.auto_scale_lr.enable = True
-        else:
-            warnings.warn('Can not find "auto_scale_lr" or "auto_scale_lr.enable" or "auto_scale_lr.base_batch_size" in your configuration file. Please update all the configuration files to mmdet >= 2.24.1.')
+    def _load_categories(self):
+        """加载类别ID到名称的映射"""
+        self.cat_id_to_name = {
+            cat['id']: cat['name'] for cat in self.coco.dataset['categories']
+        }
 
-    # set multi-process settings
-    setup_multi_processes(cfg)  # 设置多进程环境
+    def get_annotations(self, filename: str) -> Tuple[List[Dict], Optional[Dict]]:
+        """
+        获取指定文件名的标注信息和图像元数据
+        返回: (annotations, image_info)
+        """
+        img_info = self.filename_to_info.get(filename)
+        if img_info is None:
+            return [], None
 
-    # set cudnn_benchmark
-    if cfg.get('cudnn_benchmark', False):
-        torch.backends.cudnn.benchmark = True  # 启用cudnn基准测试以加速训练
+        ann_ids = self.coco.getAnnIds(imgIds=img_info['id'])
+        return self.coco.loadAnns(ann_ids), img_info
 
-    # work_dir is determined in this priority: CLI > segment in file > filename
-    if args.work_dir is not None:
-        # update configs according to CLI args if args.work_dir is not None
-        cfg.work_dir = args.work_dir
-    elif cfg.get('work_dir', None) is None:
-        # use config filename as default work_dir if cfg.work_dir is None
-        cfg.work_dir = osp.join('./work_dirs', osp.splitext(osp.basename(args.config))[0])  # 设置默认的工作目录
 
-    if args.resume_from is not None:
-        cfg.resume_from = args.resume_from
-    cfg.auto_resume = args.auto_resume
-    if args.gpus is not None:
-        cfg.gpu_ids = range(1)
-        warnings.warn('`--gpus` is deprecated because we only support single GPU mode in non-distributed training. Use `gpus=1` now.')
-    if args.gpu_ids is not None:
-        cfg.gpu_ids = args.gpu_ids[0:1]
-        warnings.warn('`--gpu-ids` is deprecated, please use `--gpu-id`. Because we only support single GPU mode in non-distributed training. Use the first GPU in `gpu_ids` now.')
-    if args.gpus is None and args.gpu_ids is None:
-        cfg.gpu_ids = [args.gpu_id]
+def resize_to_annotation_size(img: np.ndarray, target_size: Tuple[int, int]) -> np.ndarray:
+    """
+    将图像调整到标注文件中指定的尺寸（保持宽高比）
+    参数:
+        img: 输入图像 (H,W,C)
+        target_size: 目标尺寸 (width, height)
+    返回:
+        调整后的图像
+    """
+    h, w = img.shape[:2]
+    target_w, target_h = target_size
 
-    # init distributed env first, since logger depends on the dist info.
-    if args.launcher == 'none':
-        distributed = False
-    else:
-        distributed = True
-        init_dist(args.launcher, **cfg.dist_params)  # 初始化分布式环境
-        # re-set gpu_ids with distributed training mode
-        _, world_size = get_dist_info()
-        cfg.gpu_ids = range(world_size)
+    # 计算缩放比例（保持宽高比）
+    scale = min(target_w / w, target_h / h)
+    new_w = int(w * scale)
+    new_h = int(h * scale)
 
-    # create work_dir
-    mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))  # 创建工作目录
-    # dump config
-    cfg.dump(osp.join(cfg.work_dir, osp.basename(args.config)))  # 将配置文件保存到工作目录
-    # init the logger before other steps
-    timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
-    log_file = osp.join(cfg.work_dir, f'{timestamp}.log')
-    logger = get_root_logger(log_file=log_file, log_level=cfg.log_level)  # 初始化日志记录器
+    # 调整图像尺寸
+    resized_img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-    # init the meta dict to record some important information such as environment info and seed, which will be logged
-    meta = dict()
-    # log env info
-    env_info_dict = collect_env()
-    env_info = '\n'.join([(f'{k}: {v}') for k, v in env_info_dict.items()])
-    dash_line = '-' * 60 + '\n'
-    logger.info('Environment info:\n' + dash_line + env_info + '\n' + dash_line)
-    meta['env_info'] = env_info
-    meta['config'] = cfg.pretty_text
-    # log some basic info
-    logger.info(f'Distributed training: {distributed}')
-    logger.info(f'Config:\n{cfg.pretty_text}')
+    # 填充到目标尺寸（如果需要）
+    if new_w != target_w or new_h != target_h:
+        padded_img = np.zeros((target_h, target_w, 3), dtype=np.uint8)
+        padded_img[:new_h, :new_w] = resized_img
+        return padded_img
 
-    cfg.device = get_device()  # 获取设备信息
-    # set random seeds
-    seed = init_random_seed(args.seed, device=cfg.device)
-    seed = seed + dist.get_rank() if args.diff_seed else seed
-    logger.info(f'Set random seed to {seed}, deterministic: {args.deterministic}')
-    set_random_seed(seed, deterministic=args.deterministic)
-    cfg.seed = seed
-    meta['seed'] = seed
-    meta['exp_name'] = osp.basename(args.config)
+    return resized_img
 
-    model = build_detector(
-        cfg.model,
-        train_cfg=cfg.get('train_cfg'),
-        test_cfg=cfg.get('test_cfg'))  # 根据配置构建检测模型
-    model.init_weights()  # 初始化模型权重
+def crop_to_fixed_size(image, target_width=1980, target_height=1080):
+    """
+    从左上角开始裁剪图像为固定尺寸
+    :param image: 输入图像
+    :param target_width: 目标宽度
+    :param target_height: 目标高度
+    :return: 裁剪后的图像
+    """
+    height, width, _ = image.shape
 
-    datasets = [build_dataset(cfg.data.train)]  # 构建训练数据集
-    if len(cfg.workflow) == 2:
-        val_dataset = copy.deepcopy(cfg.data.val)
-        val_dataset.pipeline = cfg.data.train.pipeline
-        datasets.append(build_dataset(val_dataset))  # 构建验证数据集
-    if cfg.checkpoint_config is not None:
-        # save mmdet version, config file content and class names in checkpoints as meta data
-        cfg.checkpoint_config.meta = dict(
-            mmdet_version=__version__ + get_git_hash()[:7],
-            CLASSES=datasets[0].CLASSES)
-    # add an attribute for visualization convenience
-    model.CLASSES = datasets[0].CLASSES
-    train_detector(
-        model,
-        datasets,
-        cfg,
-        distributed=distributed,
-        validate=(not args.no_validate),
-        timestamp=timestamp,
-        meta=meta)  # 开始训练检测模型
+    # 从左上角开始裁剪
+    cropped_image = image[:target_height, :target_width]
+
+    return cropped_image
+
+def process_and_save_images(model, input_dir: str, output_dir: str,
+                            annotation_path: Optional[str] = None):
+    """
+    完整的处理流程：
+    1. 生成增强图像
+    2. 裁剪到目标尺寸
+    3. 调整图像到标注文件中的尺寸
+    4. 分别保存原始图像和带标注图像
+    """
+    # 创建输出目录结构
+    visible_dir = os.path.join(output_dir, 'visible')
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(visible_dir, exist_ok=True)
+
+    # 初始化COCO处理器
+    coco_processor = None
+    if annotation_path and os.path.exists(annotation_path):
+        try:
+            coco_processor = CocoProcessor(annotation_path)
+            print(f"Loaded COCO annotations for {len(coco_processor.filename_to_info)} images")
+        except Exception as e:
+            print(f"Warning: Failed to load COCO annotations - {str(e)}")
+
+    # 获取模型配置
+    cfg = mmcv.Config.fromfile(CONFIG_PATH)
+    test_pipeline = build_test_pipeline(cfg)
+
+    # 获取所有要处理的图像文件
+    img_files = [f for f in os.listdir(input_dir)
+                if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+    if not img_files:
+        print("No images found in input directory!")
+        return
+
+    # 创建进度条
+    progress_bar = tqdm(img_files, desc="Processing images", unit="image")
+
+    # 处理每张图像
+    for filename in progress_bar:
+        try:
+            # 更新进度条描述
+            progress_bar.set_postfix(file=filename[:15]+"..." if len(filename)>15 else filename)
+
+            # ===== 1. 生成增强图像 =====
+            img_path = os.path.join(input_dir, filename)
+            img = mmcv.imread(img_path)
+            if img is None:
+                continue
+
+            data = {
+                'img_prefix': input_dir,
+                'img_info': {'filename': filename},
+                'img': img
+            }
+            data = test_pipeline(data)
+
+            img_tensor = data['img'][0].unsqueeze(0) if isinstance(data['img'], list) \
+                else data['img'].unsqueeze(0)
+            img_tensor = img_tensor.to(device)
+
+            with torch.no_grad():
+                enhanced_img = model.diffusion.forward_test(img_tensor)
+
+            # 转换为numpy并反归一化
+            enhanced_img = enhanced_img.squeeze().permute(1, 2, 0).cpu().numpy()
+            enhanced_img = (enhanced_img * cfg.img_norm_cfg['std'] + cfg.img_norm_cfg['mean'])
+            enhanced_img = np.clip(enhanced_img, 0, 255).astype(np.uint8)
+            enhanced_img = cv2.cvtColor(enhanced_img, cv2.COLOR_RGB2BGR)
+
+            # ===== 2. 初始裁剪（可选） =====
+            cropped_image = crop_to_fixed_size(enhanced_img)
+
+            # ===== 3. 调整图像到标注尺寸 =====
+            final_img = cropped_image.copy()
+            if coco_processor:
+                annotations, img_info = coco_processor.get_annotations(filename)
+                if img_info:
+                    # 获取标注文件中指定的原始尺寸
+                    target_size = (img_info['width'], img_info['height'])
+                    final_img = resize_to_annotation_size(cropped_image, target_size)
+
+            # ===== 4. 保存调整后的图像 =====
+            output_path = os.path.join(output_dir, filename)
+            cv2.imwrite(output_path, final_img)
+
+            # ===== 5. 处理标注 =====
+            if coco_processor and annotations:
+                # 直接使用原始标注（不调整）
+                visualized_img = final_img.copy()
+                for ann in annotations:
+                    x, y, w, h = map(int, ann['bbox'])
+                    cv2.rectangle(visualized_img, (x, y), (x + w, y + h), (0, 0, 255), 2)
+
+                    # 添加标签
+                    cat_name = coco_processor.cat_id_to_name.get(ann['category_id'], 'unknown')
+                    label = f"{cat_name}"
+                    if 'score' in ann:
+                        label += f" {ann['score']:.2f}"
+                    cv2.putText(visualized_img, label, (x, y - 5),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+
+                # 保存带标注的图像
+                visible_path = os.path.join(visible_dir, filename)
+                cv2.imwrite(visible_path, visualized_img)
+
+        except Exception as e:
+            print(f"\nError processing {filename}: {str(e)}")
+
+def load_model(config_path, checkpoint_path, device='cuda:0'):
+    """加载训练好的模型"""
+    cfg = mmcv.Config.fromfile(config_path)
+    model = build_detector(cfg.model)
+    checkpoint = load_checkpoint(model, checkpoint_path, map_location=device)
+    if 'CLASSES' in checkpoint.get('meta', {}):
+        model.CLASSES = checkpoint['meta']['CLASSES']
+    model.to(device)
+    model.eval()
+    return model
+
+
+def build_test_pipeline(cfg):
+    """构建正确的测试数据流水线"""
+    return Compose([
+        dict(type='LoadImageFromFile'),
+        dict(
+            type='MultiScaleFlipAug',
+            img_scale=(1920, 1080),
+            flip=False,
+            transforms=[
+                dict(type='Resize', keep_ratio=True),
+                dict(type='Normalize', **cfg.img_norm_cfg),
+                dict(type='Pad', size_divisor=32),
+                dict(type='ImageToTensor', keys=['img']),
+                dict(type='Collect', keys=['img'], meta_keys=[])
+            ])
+    ])
 
 
 if __name__ == '__main__':
-    main()  # 执行主函数
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    if not os.path.isdir(INPUT_DIR):
+        raise FileNotFoundError(f"Input directory not found: {INPUT_DIR}")
+
+    print("Loading model...")
+    model = load_model(CONFIG_PATH, CHECKPOINT_PATH, device)
+
+    print(f"\nProcessing images from {INPUT_DIR}...")
+    process_and_save_images(model, INPUT_DIR, OUTPUT_DIR, ANNOTATION_PATH)
+
+    print(f"\nAll done! Results saved to:")
+    print(f"- Resized images: {OUTPUT_DIR}")
+    print(f"- Annotated images: {os.path.join(OUTPUT_DIR, 'visible')}")
