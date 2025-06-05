@@ -27,7 +27,7 @@ pip install yapf==0.40.1 numpy==1.26.4 mmdet==2.28.2
 ```
 To clone EnDiff, run:
 ```shell
-git clone https://github.com/dingdongtu521/en-diff.git
+git clone https://github.com/BitStrawber/my_diff.git
 cd en-diff
 ```
 ### Data Preperation
@@ -35,11 +35,10 @@ The data should be orginized as follow:
 ```
 en-diff/
     data/
-        urpc2020/
+        mydata/
             annotations/
             images/
-        coco2017/
-            train2017/
+        enhance/
 ```
 - URPC2020 can be downloaded from [here](https://github.com/xiaoDetection/Learning-Heavily-Degraded-Prior/releases/download/datasets/urpc2020.zip).
 - COCO2017 can be downloaded from [here](https://cocodataset.org/#download)
@@ -60,6 +59,39 @@ python tools/test.py \
     --eval bbox \
     --cfg-options model.init_cfg=None
 ```
+
+### Fusion
+
+We make use of groundedsam to generate your fusion_iamges.
+
+
+```shell
+#change the input_root and output_root as yours
+cd path/to/your/Grounded-Segment-Anything
+python TEST.py
+```
+you can get masks orginized as :
+```
+your_dataset/
+    class1/
+        images/
+        masks/
+    class2/
+        images/
+        masks/
+    ...
+```
+then run:
+```shell
+python mulit_fusion_new.py
+```
+to generate dataset organized as:
+```
+output_root/
+    blended_images/
+    annotations/
+    visualization/
+```
 ### Training
 
 Fist download our pre-trained model:
@@ -69,8 +101,16 @@ wget -P ./checkpoints/ https://github.com/dingdongtu521/en-diff/releases/downloa
 Then train a model:
 ```shell
 python tools/train.py \
-    configs/EnDiff_r50.py
+    configs/EnDiff_r50.py \
+    --cfg-options model.init_cfg=None
 ```
+
+### Generating
+As above we make use of `EnDiff-r50` to generate the dataset.
+```shell
+python tools/generate.py 
+```
+
 
 The results will be saved in `work_dirs/EnDiff_r50/`. 
 
