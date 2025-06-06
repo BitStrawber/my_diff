@@ -10,7 +10,7 @@ model = dict(
     init_cfg=dict(
         type='Pretrained',
         checkpoint=
-        '/home/xcx/桌面/ddpm/en-diff/work_dirs/EnDiff_r50/epoch_9.pth'
+        './work_dirs/EnDiff_r50_diff/epoch_9.pth'
     ),
     diff_cfg=dict(
         type='EnDiff',
@@ -118,17 +118,17 @@ test_pipeline = [
         ])
 ]
 dataset_type = 'HqLqCocoDataset'
-hq_img_prefix = '/home/xcx/桌面/ddpm/en-diff/data/enhance/'
-data_root = '/home/xcx/桌面/ddpm/en-diff/data/mydata/'
-train_ann = '/home/xcx/桌面/ddpm/en-diff/data/mydata/annotations/instances_train.json'
-test_ann = '/home/xcx/桌面/ddpm/en-diff/data/mydata/annotations/instances_test.json'
+hq_img_prefix = '/media/HDD0/XCX/backgrounds/'
+data_root = '/media/HDD0/XCX/new_dataset/'
+train_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/instances_train.json'
+test_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/instances_test.json'
 # hq_img_prefix = './data/coco2017/train2017/'
 # data_root = './data/urpc2020/ '
 # train_ann = './data/urpc2020/annotations/instances_train.json'
 # test_ann = './data/urpc2020/annotations/instances_test.json'
 classes = ['tiger shark', 'stingray', 'tench', 'electric ray', 'goldfish']
 data = dict(
-    samples_per_gpu=1,
+    samples_per_gpu=4,
     workers_per_gpu=4,
     train=dict(
         type=dataset_type,

@@ -54,7 +54,7 @@ wget -P ./checkpoints/ https://github.com/https://github.com/dingdongtu521/en-di
 Then test our model (set '--cfg-options' to avoid loading pre-trained weights):
 ```shell
 python tools/test.py \
-    configs/EnDiff_r50.py \
+    configs/EnDiff_r50_diff.py \
     ./checkpoints/endiff_r50_urpc.pth \
     --eval bbox \
     --cfg-options model.init_cfg=None
@@ -101,7 +101,7 @@ wget -P ./checkpoints/ https://github.com/dingdongtu521/en-diff/releases/downloa
 Then train a model:
 ```shell
 python tools/train.py \
-    configs/EnDiff_r50.py \
+    configs/EnDiff_r50_diff.py \
     --cfg-options model.init_cfg=None
 ```
 

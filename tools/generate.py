@@ -13,11 +13,11 @@ from EnDiff import *
 
 
 # ====== 配置区域 ======
-CONFIG_PATH = '../config/EnDiff_r50.py'
+CONFIG_PATH = '../config/EnDiff_r50_diff.py'
 CHECKPOINT_PATH = '../work_dirs/EnDiff_r50/epoch_1.pth'
-INPUT_DIR = '/home/xcx/桌面/synthetic_dataset/blended_images'
-OUTPUT_DIR = '/home/xcx/桌面/temp'
-ANNOTATION_PATH = '/home/xcx/桌面/synthetic_dataset/annotations/instances_all.json'
+INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/blended_images'
+OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
+ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/instances_all.json'
 
 
 # =====================
@@ -110,7 +110,9 @@ def process_and_save_images(model, input_dir: str, output_dir: str,
     """
     # 创建输出目录结构
     visible_dir = os.path.join(output_dir, 'visible')
+    images_dir = os.path.join(output_dir, 'images')
     os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(images_dir, exist_ok=True)
     os.makedirs(visible_dir, exist_ok=True)
 
     # 初始化COCO处理器
@@ -181,8 +183,8 @@ def process_and_save_images(model, input_dir: str, output_dir: str,
                     final_img = resize_to_annotation_size(cropped_image, target_size)
 
             # ===== 4. 保存调整后的图像 =====
-            output_path = os.path.join(output_dir, filename)
-            cv2.imwrite(output_path, final_img)
+            images_dir = os.path.join(images_dir, filename)
+            cv2.imwrite(images_dir, final_img)
 
             # ===== 5. 处理标注 =====
             if coco_processor and annotations:
@@ -250,5 +252,5 @@ if __name__ == '__main__':
     process_and_save_images(model, INPUT_DIR, OUTPUT_DIR, ANNOTATION_PATH)
 
     print(f"\nAll done! Results saved to:")
-    print(f"- Resized images: {OUTPUT_DIR}")
+    print(f"- Resized images: {os.path.join(OUTPUT_DIR, 'images')}")
     print(f"- Annotated images: {os.path.join(OUTPUT_DIR, 'visible')}")
