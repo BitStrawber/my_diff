@@ -9,8 +9,7 @@ model = dict(
     type='EnDiffDet',
     init_cfg=dict(
         type='Pretrained',
-        checkpoint=
-        None
+        checkpoint=None
     ),
     diff_cfg=dict(
         type='EnDiff',
