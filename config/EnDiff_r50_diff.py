@@ -134,7 +134,7 @@ classes = [
     'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
 ]
 data = dict(
-    samples_per_gpu=1,
+    samples_per_gpu=2,
     workers_per_gpu=2,
     train=dict(
         type=dataset_type,
@@ -167,10 +167,6 @@ optimizer = dict(
     paramwise_cfg=dict(
         custom_keys=dict(diffusion=dict(lr_mult=0.1, decay_mult=5.0))))
 
-optimizer_config = dict(
-    type="GradientCumulativeOptimizerHook",  # 梯度累积
-    cumulative_iters=4,  # 累积 4 个 batch 再更新权重
-)
 
 epoch_iter = 2262
 lr_config = dict(
