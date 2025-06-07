@@ -1,85 +1,87 @@
 import os
 import json
 import random
-import numpy as np
 from sklearn.model_selection import train_test_split
-from pycocotools.coco import COCO
 
 
-def stratified_split(coco_ann_file, output_dir, test_size=0.2, val_size=0.25, seed=42):
-    """分层随机划分COCO数据集"""
+def split_coco_dataset(ann_file, output_dir, part1_ratio=0.2, test_ratio=0.25, seed=42):
+    """
+    划分COCO数据集：
+    1. 随机划分为两部分（1:4比例）
+    2. 将较小的部分再划分为训练集和测试集
+
+    Args:
+        ann_file: COCO标注文件路径
+        output_dir: 输出目录
+        part1_ratio: 第一部分占比（默认0.2，即1:4）
+        test_ratio: 测试集占第一部分的比率（默认0.25）
+        seed: 随机种子
+    """
+    # 创建输出目录
     os.makedirs(output_dir, exist_ok=True)
 
     # 加载原始标注
-    with open(coco_ann_file) as f:
+    with open(ann_file) as f:
         ann_data = json.load(f)
 
-    # 按类别分层抽样
-    coco = COCO(coco_ann_file)
-    img_ids = sorted(coco.getImgIds())
-    cat_ids = coco.getCatIds()
+    # 获取所有图像ID并随机打乱
+    all_images = ann_data['images']
+    random.seed(seed)
+    random.shuffle(all_images)
 
-    # 构建类别到图像的映射
-    cat_to_imgs = {cat_id: [] for cat_id in cat_ids}
-    for img_id in img_ids:
-        ann_ids = coco.getAnnIds(imgIds=img_id)
-        anns = coco.loadAnns(ann_ids)
-        for ann in anns:
-            cat_to_imgs[ann['category_id']].append(img_id)
+    # 计算划分点
+    split_idx = int(len(all_images) * part1_ratio)
 
-    # 分层抽样：先抽20%作为第一部分
-    part1_imgs = set()
-    for cat_id, imgs in cat_to_imgs.items():
-        sampled = random.sample(imgs, int(len(imgs) * 0.2))
-        part1_imgs.update(sampled)
-    part1_imgs = list(part1_imgs)
-    part2_imgs = list(set(img_ids) - set(part1_imgs))
+    # 划分两部分
+    part1_images = all_images[:split_idx]  # 20%数据
+    part2_images = all_images[split_idx:]  # 80%数据
 
-    # 在第一部分中划分train/val
-    train_imgs, val_imgs = train_test_split(
-        part1_imgs,
-        test_size=val_size,
+    # 在第一部分中划分训练集和测试集
+    train_images, test_images = train_test_split(
+        part1_images,
+        test_size=test_ratio,
         random_state=seed
     )
 
-    # 构建各分组的标注数据
-    def _build_anns(img_ids):
-        img_ids = set(img_ids)
-        new_anns = [ann for ann in ann_data['annotations']
-                    if ann['image_id'] in img_ids]
-        new_imgs = [img for img in ann_data['images']
-                    if img['id'] in img_ids]
+    # 构建标注子集函数
+    def build_subset(images):
+        image_ids = {img['id'] for img in images}
         return {
-            'images': new_imgs,
-            'annotations': new_anns,
+            'images': images,
+            'annotations': [ann for ann in ann_data['annotations'] if ann['image_id'] in image_ids],
             'categories': ann_data['categories'],
             'info': ann_data.get('info', {}),
             'licenses': ann_data.get('licenses', [])
         }
 
-    # 保存划分结果
-    splits = {
-        'part1_train': _build_anns(train_imgs),
-        'part1_val': _build_anns(val_imgs),
-        'part2': _build_anns(part2_imgs)
-    }
+    # 构建各数据集
+    part2_ann = build_subset(part2_images)
+    train_ann = build_subset(train_images)
+    test_ann = build_subset(test_images)
 
-    for name, data in splits.items():
-        output_path = os.path.join(output_dir, f'{name}.json')
-        with open(output_path, 'w') as f:
-            json.dump(data, f)
+    # 保存结果
+    with open(os.path.join(output_dir, 'part2.json'), 'w') as f:
+        json.dump(part2_ann, f)
+    with open(os.path.join(output_dir, 'train.json'), 'w') as f:
+        json.dump(train_ann, f)
+    with open(os.path.join(output_dir, 'test.json'), 'w') as f:
+        json.dump(test_ann, f)
 
+    # 打印统计信息
     print(f"划分完成！结果保存在 {output_dir}")
-    print(f"Part1 (20%): 训练集 {len(train_imgs)}张, 验证集 {len(val_imgs)}张")
-    print(f"Part2 (80%): {len(part2_imgs)}张")
+    print(f"总图像数: {len(all_images)}")
+    print(f"Part1 (20%): {len(part1_images)}张")
+    print(f"  ├─ 训练集: {len(train_images)}张")
+    print(f"  └─ 测试集: {len(test_images)}张")
+    print(f"Part2 (80%): {len(part2_images)}张")
 
 
 if __name__ == '__main__':
     # 使用示例
-    stratified_split(
-        coco_ann_file='/media/HDD0/XCX/synthetic_dataset/annotations/instances_all.json',
+    split_coco_dataset(
+        ann_file='/media/HDD0/XCX/synthetic_dataset/annotations/instances_all.json',
         output_dir='/media/HDD0/XCX/synthetic_dataset/annotations/split_results',
-        test_size=0.2,
-        val_size=0.25,
+        part1_ratio=0.2,
+        test_ratio=0.25,
         seed=42
     )
