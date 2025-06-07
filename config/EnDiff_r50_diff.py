@@ -167,6 +167,11 @@ optimizer = dict(
     paramwise_cfg=dict(
         custom_keys=dict(diffusion=dict(lr_mult=0.1, decay_mult=5.0))))
 
+optimizer_config = dict(
+    type="GradientCumulativeOptimizerHook",  # 梯度累积
+    cumulative_iters=4,  # 累积 4 个 batch 再更新权重
+)
+
 epoch_iter = 2262
 lr_config = dict(
     _delete_=True,
