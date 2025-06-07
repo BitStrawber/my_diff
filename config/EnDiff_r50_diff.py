@@ -10,7 +10,7 @@ model = dict(
     init_cfg=dict(
         type='Pretrained',
         checkpoint=
-        './work_dirs/EnDiff_r50_diff/epoch_9.pth'
+        None
     ),
     diff_cfg=dict(
         type='EnDiff',
@@ -134,8 +134,8 @@ classes = [
     'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
 ]
 data = dict(
-    samples_per_gpu=2,
-    workers_per_gpu=2,
+    samples_per_gpu=1,
+    workers_per_gpu=1,
     train=dict(
         type=dataset_type,
         hq_img_prefix=hq_img_prefix,
@@ -166,7 +166,6 @@ optimizer = dict(
     lr=0.0025,
     paramwise_cfg=dict(
         custom_keys=dict(diffusion=dict(lr_mult=0.1, decay_mult=5.0))))
-
 
 epoch_iter = 2262
 lr_config = dict(
