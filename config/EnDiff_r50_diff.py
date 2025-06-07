@@ -126,7 +126,13 @@ test_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/instances_test.json'
 # data_root = './data/urpc2020/ '
 # train_ann = './data/urpc2020/annotations/instances_train.json'
 # test_ann = './data/urpc2020/annotations/instances_test.json'
-classes = ['tiger shark', 'stingray', 'tench', 'electric ray', 'goldfish']
+classes = [
+    'anemone fish', 'coho', 'gar', 'leatherback turtle', 'rock beauty', 'stingray',
+    'barracouta', 'conch', 'goldfish', 'lionfish', 'sea anemone', 'sturgeon',
+    'box turtle', 'coral reef', 'great white shark', 'loggerhead', 'sea slug', 'tench',
+    'brain coral', 'eel', 'hammerhead', 'mud turtle', 'sea urchin', 'terrapin',
+    'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
+]
 data = dict(
     samples_per_gpu=4,
     workers_per_gpu=4,
