@@ -3,7 +3,7 @@ import torch
 import mmcv
 import cv2
 import numpy as np
-import threading  # 添加缺失的导入
+import threading
 from mmcv.runner import load_checkpoint
 from mmdet.models import build_detector
 from mmdet.datasets.pipelines import Compose
@@ -19,7 +19,7 @@ from EnDiff import *
 CONFIG_PATH = './config/EnDiff_r50_diff.py'
 CHECKPOINT_PATH = './work_dirs/EnDiff_r50_diff/epoch_9.pth'
 INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
-OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
+OUTPUT_DIR = '/media/HDD0/XCX/generate_dataset'
 ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'
 GPU_IDS = [0, 1, 2, 3]  # 使用的GPU设备ID
 BATCH_SIZE = 16  # 根据GPU显存调整
@@ -36,7 +36,7 @@ class CocoProcessor:
             raise FileNotFoundError(f"COCO annotation file not found: {annotation_path}")
 
         self.coco = COCO(annotation_path)
-        self.lock = threading.Lock()  # 初始化锁对象
+        self.lock = threading.Lock()
         self._build_filename_index()
         self._load_categories()
 
@@ -93,7 +93,7 @@ def build_test_pipeline(cfg):
         dict(type='LoadImageFromFile'),
         dict(
             type='MultiScaleFlipAug',
-            img_scale=(1980, 1080),  # 根据实际需求调整
+            img_scale=(1980, 1080),
             flip=False,
             transforms=[
                 dict(type='Resize', keep_ratio=True),
@@ -105,31 +105,42 @@ def build_test_pipeline(cfg):
     ])
 
 
-def process_batch(model, batch_imgs, device, cfg):
-    """批量处理图像增强（支持混合精度）"""
+def process_batch(model, batch_data, device, cfg):
+    """正确处理批量数据（兼容字典和列表格式）"""
+    # 统一转换为列表格式处理
+    if isinstance(batch_data, dict):
+        batch_data = [batch_data]
+
+    # 准备输入张量
+    img_tensors = []
+    for data in batch_data:
+        if isinstance(data['img'], list):  # 处理MultiScaleFlipAug的输出
+            img_tensors.append(data['img'][0].unsqueeze(0))
+        else:
+            img_tensors.append(data['img'].unsqueeze(0))
+
+    img_tensor = torch.cat(img_tensors, dim=0).to(device)
+
+    # 使用混合精度加速推理
     with torch.no_grad(), autocast():
         if isinstance(model, DataParallel):
-            # 多GPU模式
-            enhanced_imgs = model.module.diffusion.forward_test(batch_imgs)
+            enhanced_imgs = model.module.diffusion.forward_test(img_tensor)
         else:
-            # 单GPU模式
-            enhanced_imgs = model.diffusion.forward_test(batch_imgs)
+            enhanced_imgs = model.diffusion.forward_test(img_tensor)
 
-    # 转换为numpy数组
+    # 后处理
     enhanced_imgs = enhanced_imgs.float().cpu().permute(0, 2, 3, 1).numpy()
     enhanced_imgs = (enhanced_imgs * cfg.img_norm_cfg['std'] + cfg.img_norm_cfg['mean'])
-    enhanced_imgs = np.clip(enhanced_imgs, 0, 255).astype(np.uint8)
-    return [cv2.cvtColor(img, cv2.COLOR_RGB2BGR) for img in enhanced_imgs]
+    return [cv2.cvtColor(img, cv2.COLOR_RGB2BGR) for img in np.clip(enhanced_imgs, 0, 255).astype(np.uint8)]
 
 
 def save_results(filename, enhanced_img, output_dir, coco_processor=None):
     """线程安全的结果保存函数"""
     try:
-        # 创建输出目录
         os.makedirs(os.path.join(output_dir, 'images'), exist_ok=True)
         os.makedirs(os.path.join(output_dir, 'visible'), exist_ok=True)
 
-        # 保存增强后的图像
+        # 保存增强图像
         img_path = os.path.join(output_dir, 'images', filename)
         cv2.imwrite(img_path, enhanced_img)
 
@@ -142,7 +153,6 @@ def save_results(filename, enhanced_img, output_dir, coco_processor=None):
                     x, y, w, h = map(int, ann['bbox'])
                     cv2.rectangle(visualized_img, (x, y), (x + w, y + h), (0, 0, 255), 2)
 
-                    # 添加标签
                     cat_name = coco_processor.cat_id_to_name.get(ann['category_id'], 'unknown')
                     label = f"{cat_name}"
                     if 'score' in ann:
@@ -150,7 +160,6 @@ def save_results(filename, enhanced_img, output_dir, coco_processor=None):
                     cv2.putText(visualized_img, label, (x, y - 5),
                                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
 
-                # 保存可视化结果
                 visible_path = os.path.join(output_dir, 'visible', filename)
                 cv2.imwrite(visible_path, visualized_img)
     except Exception as e:
@@ -159,7 +168,7 @@ def save_results(filename, enhanced_img, output_dir, coco_processor=None):
 
 def main():
     # 初始化环境
-    torch.backends.cudnn.benchmark = True  # 加速卷积运算
+    torch.backends.cudnn.benchmark = True
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
     # 加载模型
@@ -172,14 +181,14 @@ def main():
     if ANNOTATION_PATH and os.path.exists(ANNOTATION_PATH):
         coco_processor = CocoProcessor(ANNOTATION_PATH)
 
-    # 获取所有图像文件
+    # 获取图像文件列表
     img_files = [f for f in os.listdir(INPUT_DIR)
                  if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
     if not img_files:
         print("No images found in input directory!")
         return
 
-    # 使用线程池并行加载和保存
+    # 使用线程池并行处理
     with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
         # 分批处理
         for i in tqdm(range(0, len(img_files), BATCH_SIZE), desc="Processing batches"):
@@ -199,16 +208,19 @@ def main():
                 if not batch_imgs:
                     continue
 
-                # 预处理
-                batch_data = [{'img': img, 'img_info': {'filename': f}}
-                              for img, f in zip(batch_imgs, batch_files) if img is not None]
-                batch_processed = test_pipeline(batch_data)
+                # 预处理（每张图像单独处理）
+                batch_processed = []
+                for img, filename in zip(batch_imgs, batch_files):
+                    data = {
+                        'img': img,
+                        'img_prefix': INPUT_DIR,
+                        'img_info': {'filename': filename}
+                    }
+                    processed = test_pipeline(data)
+                    batch_processed.append(processed)
 
-                # 转换为tensor
-                img_tensor = torch.stack([data['img'] for data in batch_processed]).to(device)
-
-                # 处理增强
-                enhanced_batch = process_batch(model, img_tensor, device, cfg)
+                # 批量增强处理
+                enhanced_batch = process_batch(model, batch_processed, device, cfg)
 
                 # 并行保存结果
                 for enhanced_img, filename in zip(enhanced_batch, batch_files):
@@ -228,6 +240,4 @@ def main():
 
 
 if __name__ == '__main__':
-    import threading
-
     main()
