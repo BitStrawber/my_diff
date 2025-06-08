@@ -1,3 +1,4 @@
+import cv2
 import mmcv
 import copy
 import numpy as np
@@ -54,4 +55,38 @@ class FormatBundle(DefaultFormatBundle):
             hq_img = to_tensor(hq_img).permute(2, 0, 1).contiguous()
             results['hq_img'] = DC(
                     hq_img, padding_value=self.pad_val['img'], stack=True)
+        return results
+
+
+@PIPELINES.register_module()
+class CropPadding:
+    """兼容MMDetection原版Pad的裁剪类"""
+
+    def __init__(self, keys=('img',)):
+        self.keys = keys
+
+    def __call__(self, results):
+        # 关键：通过pad_shape和img_shape计算填充量
+        if 'pad_shape' not in results or 'img_shape' not in results:
+            return results
+
+        original_h, original_w = results['img_shape'][:2]
+        padded_h, padded_w = results['pad_shape'][:2]
+
+        # 计算右下角填充量（原版Pad的填充逻辑）
+        pad_bottom = padded_h - original_h
+        pad_right = padded_w - original_w
+
+        # 执行裁剪（去除右下填充部分）
+        for key in self.keys:
+            if key in results:
+                if isinstance(results[key], np.ndarray):
+                    results[key] = results[key][:original_h, :original_w]
+                elif hasattr(results[key], 'crop'):  # 处理mask
+                    results[key] = results[key].crop(
+                        np.array([0, 0, original_w, original_h]))
+
+        # 更新元信息
+        results['img_shape'] = (original_h, original_w)
+        results['pad_shape'] = results['img_shape']  # 裁剪后两者一致
         return results
