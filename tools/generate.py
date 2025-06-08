@@ -19,7 +19,6 @@ INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
 OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
 ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'
 
-
 # =====================
 
 class CocoProcessor:
@@ -84,20 +83,6 @@ def resize_to_annotation_size(img: np.ndarray, target_size: Tuple[int, int]) -> 
 
     return resized_img
 
-def crop_to_fixed_size(image, target_width=1980, target_height=1080):
-    """
-    从左上角开始裁剪图像为固定尺寸
-    :param image: 输入图像
-    :param target_width: 目标宽度
-    :param target_height: 目标高度
-    :return: 裁剪后的图像
-    """
-    height, width, _ = image.shape
-
-    # 从左上角开始裁剪
-    cropped_image = image[:target_height, :target_width]
-
-    return cropped_image
 
 def process_and_save_images(model, input_dir: str, output_dir: str,
                             annotation_path: Optional[str] = None):
@@ -170,17 +155,14 @@ def process_and_save_images(model, input_dir: str, output_dir: str,
             enhanced_img = np.clip(enhanced_img, 0, 255).astype(np.uint8)
             enhanced_img = cv2.cvtColor(enhanced_img, cv2.COLOR_RGB2BGR)
 
-            # ===== 2. 初始裁剪（可选） =====
-            cropped_image = crop_to_fixed_size(enhanced_img)
-
             # ===== 3. 调整图像到标注尺寸 =====
-            final_img = cropped_image.copy()
+            final_img = enhanced_img.copy()
             if coco_processor:
                 annotations, img_info = coco_processor.get_annotations(filename)
                 if img_info:
                     # 获取标注文件中指定的原始尺寸
                     target_size = (img_info['width'], img_info['height'])
-                    final_img = resize_to_annotation_size(cropped_image, target_size)
+                    final_img = resize_to_annotation_size(enhanced_img, target_size)
 
             # ===== 4. 保存调整后的图像 =====
             images_path = os.path.join(images_dir, filename)
@@ -233,6 +215,7 @@ def build_test_pipeline(cfg):
                 dict(type='Resize', keep_ratio=True),
                 dict(type='Normalize', **cfg.img_norm_cfg),
                 dict(type='Pad', size_divisor=32),
+                dict(type='CropPadding'),
                 dict(type='ImageToTensor', keys=['img']),
                 dict(type='Collect', keys=['img'], meta_keys=[])
             ])

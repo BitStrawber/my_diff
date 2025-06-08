@@ -23,6 +23,9 @@ class EnDiffDet(CascadeRCNN):
 
         assert train_mode in ['det', 'sample']
 
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
+
         self.train_mode = train_mode
         if train_mode == 'det': # train detection
             unfreeze_module(self)
@@ -30,6 +33,10 @@ class EnDiffDet(CascadeRCNN):
         elif train_mode == 'sample':
             freeze_module(self)
             unfreeze_module(self.diffusion.net)
+
+        # 确保所有进程完成模式切换
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
         return 
 
     def extract_feat(self, x):
