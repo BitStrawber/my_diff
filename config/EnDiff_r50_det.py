@@ -133,8 +133,8 @@ classes = [
     'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
 ]
 data = dict(
-    samples_per_gpu=4,
-    workers_per_gpu=4,
+    samples_per_gpu=8,
+    workers_per_gpu=8,
     train=dict(
         type=dataset_type,
         hq_img_prefix=hq_img_prefix,
