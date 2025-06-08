@@ -3,6 +3,7 @@ import torch
 import mmcv
 import cv2
 import numpy as np
+import threading  # 添加缺失的导入
 from mmcv.runner import load_checkpoint
 from mmdet.models import build_detector
 from mmdet.datasets.pipelines import Compose
@@ -18,7 +19,7 @@ from EnDiff import *
 CONFIG_PATH = './config/EnDiff_r50_diff.py'
 CHECKPOINT_PATH = './work_dirs/EnDiff_r50_diff/epoch_9.pth'
 INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
-OUTPUT_DIR = '/media/HDD0/XCX/generate_dataset'
+OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
 ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'
 GPU_IDS = [0, 1, 2, 3]  # 使用的GPU设备ID
 BATCH_SIZE = 16  # 根据GPU显存调整
@@ -35,9 +36,9 @@ class CocoProcessor:
             raise FileNotFoundError(f"COCO annotation file not found: {annotation_path}")
 
         self.coco = COCO(annotation_path)
+        self.lock = threading.Lock()  # 初始化锁对象
         self._build_filename_index()
         self._load_categories()
-        self.lock = threading.Lock()
 
     def _build_filename_index(self):
         """构建文件名到图像元数据的索引"""
