@@ -9,8 +9,7 @@ model = dict(
     type='EnDiffDet',
     init_cfg=dict(
         type='Pretrained',
-        checkpoint=
-        None
+        checkpoint= '../work_dirs/EnDiff_r50_diff/epoch_9.pth'
     ),
     diff_cfg=dict(
         type='EnDiff',
@@ -134,7 +133,7 @@ classes = [
     'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
 ]
 data = dict(
-    samples_per_gpu=1,
+    samples_per_gpu=2,
     workers_per_gpu=2,
     train=dict(
         type=dataset_type,
