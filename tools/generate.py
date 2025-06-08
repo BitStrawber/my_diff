@@ -13,7 +13,7 @@ from EnDiff import *
 
 
 # ====== 配置区域 ======
-CONFIG_PATH = '../config/EnDiff_r50_diff.py'
+CONFIG_PATH = './config/EnDiff_r50_diff.py'
 CHECKPOINT_PATH = '../work_dirs/EnDiff_r50_diff/epoch_9.pth'
 INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
 OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
