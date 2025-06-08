@@ -12,6 +12,7 @@ from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor
 from torch.nn.parallel import DataParallel
 from torch.cuda.amp import autocast
+from EnDiff import *
 
 # ====== 配置区域 ======
 CONFIG_PATH = './config/EnDiff_r50_diff.py'
