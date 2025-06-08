@@ -9,7 +9,7 @@ model = dict(
     type='EnDiffDet',
     init_cfg=dict(
         type='Pretrained',
-        checkpoint= '../work_dirs/EnDiff_r50_diff/epoch_10.pth'
+        checkpoint= './work_dirs/EnDiff_r50_diff/epoch_10.pth'
     ),
     diff_cfg=dict(
         type='EnDiff',
