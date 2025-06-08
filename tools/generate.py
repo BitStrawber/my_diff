@@ -183,8 +183,8 @@ def process_and_save_images(model, input_dir: str, output_dir: str,
                     final_img = resize_to_annotation_size(cropped_image, target_size)
 
             # ===== 4. 保存调整后的图像 =====
-            images_dir = os.path.join(images_dir, filename)
-            cv2.imwrite(images_dir, final_img)
+            images_path = os.path.join(images_dir, filename)
+            cv2.imwrite(images_path, final_img)
 
             # ===== 5. 处理标注 =====
             if coco_processor and annotations:
