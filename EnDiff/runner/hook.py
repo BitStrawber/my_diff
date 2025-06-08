@@ -1,3 +1,4 @@
+import torch
 from mmcv import runner
 from mmcv.runner.hooks import HOOKS,Hook, LrUpdaterHook
 from typing import List
@@ -16,6 +17,9 @@ class TrainModeControlHook(Hook):
         self.model = runner.model.module
 
     def before_train_epoch(self, runner):
+        # 确保所有进程同步
+        if torch.distributed.is_initialized():
+            torch.distributed.barrier()
         epoch = runner.epoch + 1
         train_stage = 0
         while epoch > self.swich_epoch[train_stage] and train_stage < len(self.train_modes) - 1:
