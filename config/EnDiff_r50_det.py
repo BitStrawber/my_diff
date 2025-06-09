@@ -4,7 +4,7 @@ _base_ = [
 ]
 
 # model
-num_classes = 30
+num_classes = 10
 model = dict(
     type='EnDiffDet',
     init_cfg=dict(
