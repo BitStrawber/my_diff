@@ -3,6 +3,7 @@ from mmdet.datasets.builder import DATASETS
 from mmdet.datasets.pipelines import Compose
 import os
 import os.path as osp
+from random import randint
 
 @DATASETS.register_module()
 class HqLqCocoDataset(CocoDataset):
@@ -34,13 +35,19 @@ class HqLqCocoDataset(CocoDataset):
                 filter_empty_gt,
                 file_client_args
             )
+        # self.hq_img_dir = hq_img_prefix if data_root is None else osp.join(data_root, hq_img_prefix)
         self.hq_img_dir = hq_img_prefix if data_root is None else osp.join(data_root, hq_img_prefix)
+        self.hq_img_names = [name for name in sorted(os.listdir(self.hq_img_dir)) if name.endswith('.jpg')]
+        self.hq_img_num = len(self.hq_img_names)
 
     def pre_pipeline(self, results):
+        # super().pre_pipeline(results)
+        # # Get the filename of the HQ image based on the LQ image filename
+        # lq_filename = results['img_info']['file_name']
+        # hq_filename = lq_filename  # Assuming HQ and LQ images have the same filename
+        # results['hq_img_filename'] = osp.join(self.hq_img_dir, hq_filename)
+        # # Print the results dictionary
+        # # print(f"Results dictionary: {results}")
         super().pre_pipeline(results)
-        # Get the filename of the HQ image based on the LQ image filename
-        lq_filename = results['img_info']['file_name']
-        hq_filename = lq_filename  # Assuming HQ and LQ images have the same filename
-        results['hq_img_filename'] = osp.join(self.hq_img_dir, hq_filename)
-        # Print the results dictionary
-        # print(f"Results dictionary: {results}")
+        idx = randint(0, self.hq_img_num - 1)
+        results['hq_img_filename'] = osp.join(self.hq_img_dir, self.hq_img_names[idx])
