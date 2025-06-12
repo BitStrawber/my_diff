@@ -19,8 +19,7 @@ num_classes = 10
 model = dict(
     init_cfg=dict(
         type='Pretrained',
-        checkpoint='./work_dirs/EnDiff_r50_ruod/best_bbox_mAP_epoch_24.pth',
-        prefix='backbone'
+        checkpoint='./work_dirs/EnDiff_r50_ruod/best_bbox_mAP_epoch_24.pth'
     ),
     roi_head=dict(
         bbox_head=[

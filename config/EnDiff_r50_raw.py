@@ -19,8 +19,7 @@ num_classes = 10
 model = dict(
     init_cfg=dict(
         type='Pretrained',
-        checkpoint='torchvision://resnet50',
-        prefix='backbone'
+        checkpoint='torchvision://resnet50'
     ),
     roi_head=dict(
         bbox_head=[
