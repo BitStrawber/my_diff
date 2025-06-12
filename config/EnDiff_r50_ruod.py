@@ -75,11 +75,12 @@ model = dict(
                 loss_bbox=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1.0))
         ])
 )
-gpu_ids = range(3)
+gpu_num = 3
+gpu_ids = range(gpu_num)
 
 data = dict(
-    samples_per_gpu=4,     # 根据GPU显存调整
-    workers_per_gpu=4,     # 数据加载线程数
+    samples_per_gpu=2,
+    workers_per_gpu=4,
     train=dict(
         ann_file=train_ann,
         img_prefix=data_root+'images/',
@@ -98,5 +99,5 @@ data = dict(
 )
 
 # 其他自定义参数
-optimizer = dict(type='SGD', lr=0.02, momentum=0.9, weight_decay=0.0001)
+optimizer = dict(type='SGD', lr=0.02*gpu_num, momentum=0.9, weight_decay=0.0001)
 runner = dict(type='EpochBasedRunner', max_epochs=24)
