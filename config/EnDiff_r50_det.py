@@ -30,7 +30,7 @@ model = dict(
         ]
     )
 )
-gpu_ids = range(4)
+gpu_ids = range(3)
 
 data = dict(
     samples_per_gpu=4,     # 根据GPU显存调整
