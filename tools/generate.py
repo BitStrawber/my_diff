@@ -1,5 +1,6 @@
 import os
 import torch
+import torch.distributed as dist
 import mmcv
 import cv2
 import numpy as np
@@ -9,15 +10,22 @@ from mmdet.datasets.pipelines import Compose
 from pycocotools.coco import COCO
 from typing import List, Dict, Optional, Tuple
 from tqdm import tqdm  # 导入进度条库
+import sys
+sys.path.append('./')
 from EnDiff import *
 
 
 # ====== 配置区域 ======
-CONFIG_PATH = './config/EnDiff_r50_diff.py'
-CHECKPOINT_PATH = './work_dirs/EnDiff_r50_diff/epoch_9.pth'
-INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
-OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
-ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'
+# CONFIG_PATH = './config/EnDiff_r50_diff.py'
+# CHECKPOINT_PATH = './work_dirs/EnDiff_r50_diff/epoch_9.pth'
+# INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
+# OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
+# ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'
+CONFIG_PATH = './config/diff.py'
+CHECKPOINT_PATH = './work_dirs/EnDiff_r50/epoch_1.pth'
+INPUT_DIR = '/home/xcx/桌面/synthetic_dataset/blended_images'
+OUTPUT_DIR = '/home/xcx/桌面/temp'
+ANNOTATION_PATH = '/home/xcx/桌面/synthetic_dataset/annotations/instances_all.json'
 
 # =====================
 
@@ -85,7 +93,7 @@ def resize_to_annotation_size(img: np.ndarray, target_size: Tuple[int, int]) -> 
 
 
 def process_and_save_images(model, input_dir: str, output_dir: str,
-                            annotation_path: Optional[str] = None):
+                            annotation_path: Optional[str] = None, rank: int = 0, world_size: int = 1):
     """
     完整的处理流程：
     1. 生成增强图像
@@ -93,21 +101,32 @@ def process_and_save_images(model, input_dir: str, output_dir: str,
     3. 调整图像到标注文件中的尺寸
     4. 分别保存原始图像和带标注图像
     """
-    # 创建输出目录结构
-    visible_dir = os.path.join(output_dir, 'visible')
-    images_dir = os.path.join(output_dir, 'images')
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(images_dir, exist_ok=True)
-    os.makedirs(visible_dir, exist_ok=True)
+    # 创建输出目录结构（仅rank 0创建）
+    if rank == 0:
+        visible_dir = os.path.join(output_dir, 'visible')
+        images_dir = os.path.join(output_dir, 'images')
+        os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(images_dir, exist_ok=True)
+        os.makedirs(visible_dir, exist_ok=True)
+    else:
+        visible_dir = os.path.join(output_dir, 'visible')
+        images_dir = os.path.join(output_dir, 'images')
 
-    # 初始化COCO处理器
+    # 初始化COCO处理器（仅rank 0执行）
     coco_processor = None
-    if annotation_path and os.path.exists(annotation_path):
+    if rank == 0 and annotation_path and os.path.exists(annotation_path):
         try:
             coco_processor = CocoProcessor(annotation_path)
             print(f"Loaded COCO annotations for {len(coco_processor.filename_to_info)} images")
+            if annotation_path and os.path.exists(annotation_path):
+                try:
+                    coco_processor = CocoProcessor(annotation_path)
+                    print(f"Loaded COCO annotations for {len(coco_processor.filename_to_info)} images")
+                except Exception as e:
+                    print(f"Warning: Failed to load COCO annotations - {str(e)}")
         except Exception as e:
             print(f"Warning: Failed to load COCO annotations - {str(e)}")
+
 
     # 获取模型配置
     cfg = mmcv.Config.fromfile(CONFIG_PATH)
@@ -117,17 +136,22 @@ def process_and_save_images(model, input_dir: str, output_dir: str,
     img_files = [f for f in os.listdir(input_dir)
                 if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
     if not img_files:
-        print("No images found in input directory!")
+        if rank == 0:
+            print("No images found in input directory!")
         return
 
-    # 创建进度条
-    progress_bar = tqdm(img_files, desc="Processing images", unit="image")
+    # 分布式数据分配
+    local_files = [f for i, f in enumerate(img_files) if i % world_size == rank]
+
+    # 创建进度条（各rank独立显示）
+    progress_bar = tqdm(local_files, desc=f"Rank {rank}", position=rank, disable=(rank != 0))
 
     # 处理每张图像
     for filename in progress_bar:
         try:
             # 更新进度条描述
-            progress_bar.set_postfix(file=filename[:15]+"..." if len(filename)>15 else filename)
+            if rank == 0:
+                progress_bar.set_postfix(file=filename[:15] + "..." if len(filename) > 15 else filename)
 
             # ===== 1. 生成增强图像 =====
             img_path = os.path.join(input_dir, filename)
@@ -147,7 +171,7 @@ def process_and_save_images(model, input_dir: str, output_dir: str,
             img_tensor = img_tensor.to(device)
 
             with torch.no_grad():
-                enhanced_img = model.diffusion.forward_test(img_tensor)
+                enhanced_img = model.module.diffusion.forward_test(img_tensor)
 
             # 转换为numpy并反归一化
             enhanced_img = enhanced_img.squeeze().permute(1, 2, 0).cpu().numpy()
@@ -189,9 +213,9 @@ def process_and_save_images(model, input_dir: str, output_dir: str,
                 cv2.imwrite(visible_path, visualized_img)
 
         except Exception as e:
-            print(f"\nError processing {filename}: {str(e)}")
+            print(f"\nRank {rank} error processing {filename}: {str(e)}")
 
-def load_model(config_path, checkpoint_path, device='cuda:0'):
+def load_model(config_path, checkpoint_path, device=None):
     """加载训练好的模型"""
     cfg = mmcv.Config.fromfile(config_path)
     model = build_detector(cfg.model)
@@ -221,19 +245,52 @@ def build_test_pipeline(cfg):
             ])
     ])
 
+def init_distributed():
+    """初始化分布式环境"""
+    if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
+        rank = int(os.environ['RANK'])
+        world_size = int(os.environ['WORLD_SIZE'])
+        gpu = int(os.environ['LOCAL_RANK'])
+        torch.cuda.set_device(gpu)
+        dist.init_process_group(backend='nccl', init_method='env://')
+        return True, rank, world_size, gpu
+    return False, 0, 1, 0
+
 
 if __name__ == '__main__':
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    # 初始化分布式环境
+    distributed, rank, world_size, gpu = init_distributed()
+    device = torch.device(f'cuda:{gpu}' if torch.cuda.is_available() else 'cpu')
+
+    # 加载模型（仅在rank 0打印信息）
+    if rank == 0:
+        print("Loading model...")
+    model = load_model(CONFIG_PATH, CHECKPOINT_PATH, device)
+
+    # 模型分布式包装
+    if distributed:
+        model = torch.nn.parallel.DistributedDataParallel(
+            model.cuda(),
+            device_ids=[torch.cuda.current_device()],
+            output_device=torch.cuda.current_device())
+    else:
+        model = torch.nn.DataParallel(model)
+    model.eval()
+
+    # 处理图像
+    if rank == 0:
+        print(f"\nProcessing images from {INPUT_DIR}...")
 
     if not os.path.isdir(INPUT_DIR):
         raise FileNotFoundError(f"Input directory not found: {INPUT_DIR}")
 
-    print("Loading model...")
-    model = load_model(CONFIG_PATH, CHECKPOINT_PATH, device)
 
     print(f"\nProcessing images from {INPUT_DIR}...")
-    process_and_save_images(model, INPUT_DIR, OUTPUT_DIR, ANNOTATION_PATH)
+    process_and_save_images(model, INPUT_DIR, OUTPUT_DIR, ANNOTATION_PATH, rank=rank,
+        world_size=world_size)
 
-    print(f"\nAll done! Results saved to:")
-    print(f"- Resized images: {os.path.join(OUTPUT_DIR, 'images')}")
-    print(f"- Annotated images: {os.path.join(OUTPUT_DIR, 'visible')}")
+    if rank == 0:
+        print(f"\nAll done! Results saved to:")
+        print(f"- Resized images: {os.path.join(OUTPUT_DIR, 'images')}")
+        print(f"- Annotated images: {os.path.join(OUTPUT_DIR, 'visible')}")

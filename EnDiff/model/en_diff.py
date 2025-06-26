@@ -44,7 +44,6 @@ class MyGaussianBlur(torch.nn.Module):
         new_pic2 = torch.nn.functional.conv2d(image, weight, padding=self.radius, groups=3)
         return new_pic2
 
-@DETECTORS.register_module()
 @MODELS.register_module()
 class EnDiff(BaseModule):
     def __init__(

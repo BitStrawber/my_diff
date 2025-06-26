@@ -4,12 +4,12 @@ _base_ = [
 ]
 
 # model
-num_classes = 30
+num_classes = 5
 model = dict(
     type='EnDiffDet',
     init_cfg=dict(
         type='Pretrained',
-        checkpoint=None
+        checkpoint='/home/xcx/桌面/my_diff/work_dirs/EnDiff_r50/epoch_2.pth'
     ),
     diff_cfg=dict(
         type='EnDiff',
@@ -117,21 +117,23 @@ test_pipeline = [
         ])
 ]
 dataset_type = 'HqLqCocoDataset'
-hq_img_prefix = '/media/HDD0/XCX/backgrounds/'
-data_root = '/media/HDD0/XCX/synthetic_dataset/'
-train_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/train.json'
-test_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/test.json'
-# hq_img_prefix = './data/coco2017/train2017/'
-# data_root = './data/urpc2020/ '
-# train_ann = './data/urpc2020/annotations/instances_train.json'
-# test_ann = './data/urpc2020/annotations/instances_test.json'
-classes = [
-    'anemone fish', 'coho', 'gar', 'leatherback turtle', 'rock beauty', 'stingray',
-    'barracouta', 'conch', 'goldfish', 'lionfish', 'sea anemone', 'sturgeon',
-    'box turtle', 'coral reef', 'great white shark', 'loggerhead', 'sea slug', 'tench',
-    'brain coral', 'eel', 'hammerhead', 'mud turtle', 'sea urchin', 'terrapin',
-    'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
-]
+# hq_img_prefix = '/media/HDD0/XCX/backgrounds/'
+# data_root = '/media/HDD0/XCX/synthetic_dataset/'
+# train_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/train.json'
+# test_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/test.json'
+hq_img_prefix = '/home/xcx/桌面/ddpm/en-diff/data/enhance/'
+data_root = '/home/xcx/桌面/ddpm/en-diff/data/mydata/'
+train_ann = '/home/xcx/桌面/ddpm/en-diff/data/mydata/annotations/instances_train.json'
+test_ann = '/home/xcx/桌面/ddpm/en-diff/data/mydata/annotations/instances_test.json'
+
+classes = ['0', '1', '2', '3', '4']
+# classes = [
+#     'anemone fish', 'coho', 'gar', 'leatherback turtle', 'rock beauty', 'stingray',
+#     'barracouta', 'conch', 'goldfish', 'lionfish', 'sea anemone', 'sturgeon',
+#     'box turtle', 'coral reef', 'great white shark', 'loggerhead', 'sea slug', 'tench',
+#     'brain coral', 'eel', 'hammerhead', 'mud turtle', 'sea urchin', 'terrapin',
+#     'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
+# ]
 data = dict(
     samples_per_gpu=2,
     workers_per_gpu=4,
@@ -188,3 +190,10 @@ custom_hooks = [
         type='TrainModeControlHook', train_modes=['sample', 'det'], num_epoch=[6, 6])
 ]
 fp16 = dict(loss_scale=512.0)
+
+# ====== 配置区域 ======
+# CONFIG_PATH = './config/EnDiff_r50_diff.py'
+# CHECKPOINT_PATH = './work_dirs/EnDiff_r50_diff/epoch_9.pth'
+# INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
+# OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
+# ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'

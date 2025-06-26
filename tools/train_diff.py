@@ -1,6 +1,7 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import argparse
 import copy
+import json
 import os
 import os.path as osp
 import time
@@ -20,7 +21,69 @@ from mmdet.models import build_detector
 from mmdet.utils import (collect_env, get_device, get_root_logger,
                          replace_cfg_vals, setup_multi_processes,
                          update_data_root)
+import sys
+sys.path.append('./')
+from EnDiff import *
 
+
+def check_data_paths(cfg):
+    """检查所有数据路径是否存在"""
+    required_paths = [
+        cfg.data.train.ann_file,
+        cfg.data.train.img_prefix,
+        cfg.data.val.ann_file,
+        cfg.data.val.img_prefix
+    ]
+
+    missing_paths = []
+    for path in required_paths:
+        if not osp.exists(path):
+            missing_paths.append(path)
+
+    if missing_paths:
+        raise FileNotFoundError(
+            f"以下路径不存在:\n{'n'.join(missing_paths)}\n"
+            f"当前工作目录: {os.getcwd()}"
+        )
+    else:
+        print("✅ 所有数据路径验证通过")
+
+
+def validate_dataset(cfg):
+    """全面验证数据集完整性"""
+    # 1. 路径检查
+    print("\n=== 正在检查数据路径 ===")
+    check_data_paths(cfg)
+
+    # 2. 标注文件检查
+    print("\n=== 正在检查标注文件 ===")
+    for phase in ['train', 'val']:
+        ann_file = getattr(cfg.data, phase).ann_file
+        try:
+            with open(ann_file) as f:
+                ann = json.load(f)
+                print(f"{phase}标注文件: 包含 {len(ann['images'])} 张图像, {len(ann['annotations'])} 个标注")
+        except Exception as e:
+            raise ValueError(f"{phase}标注文件解析失败: {str(e)}")
+
+    # 3. 图像采样检查
+    print("\n=== 正在抽样检查图像文件 ===")
+    for phase in ['train', 'val']:
+        dataset = build_dataset(getattr(cfg.data, phase))
+        print(f"{phase}数据集总样本数: {len(dataset)}")
+
+        # 检查前5个样本
+        for i in range(min(5, len(dataset))):
+            sample = dataset[i]
+            img_path = sample['filename']
+            hq_path = sample['hq_img_filename']
+
+            print(f"\n样本 {i}:")
+            print(f"LQ图像路径: {img_path} -> {'存在' if osp.exists(img_path) else '缺失'}")
+            print(f"HQ图像路径: {hq_path} -> {'存在' if osp.exists(hq_path) else '缺失'}")
+
+            if 'gt_bboxes' in sample:
+                print(f"标注框数量: {len(sample['gt_bboxes'])}")
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a diffusion model')
@@ -110,6 +173,7 @@ def main():
     args = parse_args()
 
     cfg = Config.fromfile(args.config)
+
 
     # replace the ${key} with the value of cfg.key
     cfg = replace_cfg_vals(cfg)
