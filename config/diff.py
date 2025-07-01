@@ -1,6 +1,6 @@
 _base_ = [
-    '../_base_/schedules/schedule_2x.py',
-    '../_base_/default_runtime.py'
+    './_base_/schedules/schedule_2x.py',
+    './_base_/default_runtime.py'
 ]
 
 # 模型配置
