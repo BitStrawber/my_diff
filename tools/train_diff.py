@@ -1,14 +1,13 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import argparse
 import copy
-import json
 import os
 import os.path as osp
 import time
 import warnings
 
-import mmcv
 import torch
+import mmcv
 import torch.distributed as dist
 from mmcv import Config, DictAction
 from mmcv.runner import get_dist_info, init_dist
@@ -26,67 +25,8 @@ sys.path.append('./')
 from EnDiff import *
 
 
-def check_data_paths(cfg):
-    """检查所有数据路径是否存在"""
-    required_paths = [
-        cfg.data.train.ann_file,
-        cfg.data.train.img_prefix,
-        cfg.data.val.ann_file,
-        cfg.data.val.img_prefix
-    ]
-
-    missing_paths = []
-    for path in required_paths:
-        if not osp.exists(path):
-            missing_paths.append(path)
-
-    if missing_paths:
-        raise FileNotFoundError(
-            f"以下路径不存在:\n{'n'.join(missing_paths)}\n"
-            f"当前工作目录: {os.getcwd()}"
-        )
-    else:
-        print("✅ 所有数据路径验证通过")
-
-
-def validate_dataset(cfg):
-    """全面验证数据集完整性"""
-    # 1. 路径检查
-    print("\n=== 正在检查数据路径 ===")
-    check_data_paths(cfg)
-
-    # 2. 标注文件检查
-    print("\n=== 正在检查标注文件 ===")
-    for phase in ['train', 'val']:
-        ann_file = getattr(cfg.data, phase).ann_file
-        try:
-            with open(ann_file) as f:
-                ann = json.load(f)
-                print(f"{phase}标注文件: 包含 {len(ann['images'])} 张图像, {len(ann['annotations'])} 个标注")
-        except Exception as e:
-            raise ValueError(f"{phase}标注文件解析失败: {str(e)}")
-
-    # 3. 图像采样检查
-    print("\n=== 正在抽样检查图像文件 ===")
-    for phase in ['train', 'val']:
-        dataset = build_dataset(getattr(cfg.data, phase))
-        print(f"{phase}数据集总样本数: {len(dataset)}")
-
-        # 检查前5个样本
-        for i in range(min(5, len(dataset))):
-            sample = dataset[i]
-            img_path = sample['filename']
-            hq_path = sample['hq_img_filename']
-
-            print(f"\n样本 {i}:")
-            print(f"LQ图像路径: {img_path} -> {'存在' if osp.exists(img_path) else '缺失'}")
-            print(f"HQ图像路径: {hq_path} -> {'存在' if osp.exists(hq_path) else '缺失'}")
-
-            if 'gt_bboxes' in sample:
-                print(f"标注框数量: {len(sample['gt_bboxes'])}")
-
 def parse_args():
-    parser = argparse.ArgumentParser(description='Train a diffusion model')
+    parser = argparse.ArgumentParser(description='Train a detector')
     parser.add_argument('config', help='train config file path')
     parser.add_argument('--work-dir', help='the dir to save logs and models')
     parser.add_argument(
@@ -104,19 +44,19 @@ def parse_args():
         '--gpus',
         type=int,
         help='(Deprecated, please use --gpu-id) number of gpus to use '
-             '(only applicable to non-distributed training)')
+        '(only applicable to non-distributed training)')
     group_gpus.add_argument(
         '--gpu-ids',
         type=int,
         nargs='+',
         help='(Deprecated, please use --gpu-id) ids of gpus to use '
-             '(only applicable to non-distributed training)')
+        '(only applicable to non-distributed training)')
     group_gpus.add_argument(
         '--gpu-id',
         type=int,
         default=0,
         help='id of gpu to use '
-             '(only applicable to non-distributed training)')
+        '(only applicable to non-distributed training)')
     parser.add_argument('--seed', type=int, default=None, help='random seed')
     parser.add_argument(
         '--diff-seed',
@@ -131,18 +71,18 @@ def parse_args():
         nargs='+',
         action=DictAction,
         help='override some settings in the used config, the key-value pair '
-             'in xxx=yyy format will be merged into config file (deprecate), '
-             'change to --cfg-options instead.')
+        'in xxx=yyy format will be merged into config file (deprecate), '
+        'change to --cfg-options instead.')
     parser.add_argument(
         '--cfg-options',
         nargs='+',
         action=DictAction,
         help='override some settings in the used config, the key-value pair '
-             'in xxx=yyy format will be merged into config file. If the value to '
-             'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
-             'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
-             'Note that the quotation marks are necessary and that no white space '
-             'is allowed.')
+        'in xxx=yyy format will be merged into config file. If the value to '
+        'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
+        'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
+        'Note that the quotation marks are necessary and that no white space '
+        'is allowed.')
     parser.add_argument(
         '--launcher',
         choices=['none', 'pytorch', 'slurm', 'mpi'],
@@ -153,8 +93,13 @@ def parse_args():
         '--auto-scale-lr',
         action='store_true',
         help='enable automatically scaling LR.')
+    parser.add_argument(
+        '--train-mode',
+        type=str,
+        default='both',
+        choices=['both', 'diff', 'det'],
+        help='训练模式选择: both(联合训练), diff(仅训练扩散模型), det(仅训练检测模型)')
     args = parser.parse_args()
-
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
 
@@ -174,7 +119,6 @@ def main():
 
     cfg = Config.fromfile(args.config)
 
-
     # replace the ${key} with the value of cfg.key
     cfg = replace_cfg_vals(cfg)
 
@@ -184,22 +128,17 @@ def main():
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
 
-    # 确保配置文件中没有检测相关的设置
-    if 'detector' in cfg.model or 'roi_head' in cfg.model:
-        warnings.warn('Detector related configurations found in the config file. '
-                      'These will be ignored for diffusion model training.')
-
-    # 自动调整学习率
     if args.auto_scale_lr:
         if 'auto_scale_lr' in cfg and \
                 'enable' in cfg.auto_scale_lr and \
                 'base_batch_size' in cfg.auto_scale_lr:
             cfg.auto_scale_lr.enable = True
-        else:
+        #else:
             warnings.warn('Can not find "auto_scale_lr" or '
                           '"auto_scale_lr.enable" or '
                           '"auto_scale_lr.base_batch_size" in your'
-                          ' configuration file.')
+                          ' configuration file. Please update all the '
+                          'configuration files to mmdet >= 2.24.1.')
 
     # set multi-process settings
     setup_multi_processes(cfg)
@@ -210,33 +149,49 @@ def main():
 
     # work_dir is determined in this priority: CLI > segment in file > filename
     if args.work_dir is not None:
+        # update configs according to CLI args if args.work_dir is not None
         cfg.work_dir = args.work_dir
     elif cfg.get('work_dir', None) is None:
-        cfg.work_dir = osp.join('./work_dirs_diff',
+        # use config filename as default work_dir if cfg.work_dir is None
+        cfg.work_dir = osp.join('./work_dirs',
                                 osp.splitext(osp.basename(args.config))[0])
 
     if args.resume_from is not None:
         cfg.resume_from = args.resume_from
     cfg.auto_resume = args.auto_resume
-
-    # GPU设置
     if args.gpus is not None:
         cfg.gpu_ids = range(1)
-        warnings.warn('`--gpus` is deprecated. Use `gpus=1` now.')
+        warnings.warn('`--gpus` is deprecated because we only support '
+                      'single GPU mode in non-distributed training. '
+                      'Use `gpus=1` now.')
     if args.gpu_ids is not None:
         cfg.gpu_ids = args.gpu_ids[0:1]
-        warnings.warn('`--gpu-ids` is deprecated, please use `--gpu-id`.')
+        warnings.warn('`--gpu-ids` is deprecated, please use `--gpu-id`. '
+                      'Because we only support single GPU mode in '
+                      'non-distributed training. Use the first GPU '
+                      'in `gpu_ids` now.')
     if args.gpus is None and args.gpu_ids is None:
         cfg.gpu_ids = [args.gpu_id]
+
+    if args.train_mode == 'diff':
+        cfg.custom_hooks[1]['train_modes'] = ['sample']
+        cfg.custom_hooks[1]['num_epoch'] = [12]
+    elif args.train_mode == 'det':
+        cfg.custom_hooks[1]['train_modes'] = ['det']
+        cfg.custom_hooks[1]['num_epoch'] = [12]
 
     # init distributed env first, since logger depends on the dist info.
     if args.launcher == 'none':
         distributed = False
     else:
         distributed = True
+        # 修改1: 在init_dist前设置正确的设备
+        torch.cuda.set_device(args.local_rank)
         init_dist(args.launcher, **cfg.dist_params)
+        # 修改2: 添加初始化后的同步
+        dist.barrier()
         # re-set gpu_ids with distributed training mode
-        _, world_size = get_dist_info()
+        rank, world_size = get_dist_info()
         cfg.gpu_ids = range(world_size)
 
     # create work_dir
@@ -274,29 +229,51 @@ def main():
     meta['seed'] = seed
     meta['exp_name'] = osp.basename(args.config)
 
-    # build model - 这里会构建你的扩散模型
     model = build_detector(
         cfg.model,
         train_cfg=cfg.get('train_cfg'),
         test_cfg=cfg.get('test_cfg'))
     model.init_weights()
 
-    # build dataset - 使用你的HqLqCocoDataset
-    datasets = [build_dataset(cfg.data.train)]
+    # 修改3: 改进的DDP包装逻辑
+    if distributed:
+        # 确保所有进程完成模型构建
+        dist.barrier()
 
-    # 验证集设置
+        # 使用local_rank而不是gpu_id
+        device = torch.device('cuda', args.local_rank)
+        model = model.to(device)
+
+        # 修改4: 更健壮的DDP配置
+        model = torch.nn.parallel.DistributedDataParallel(
+            model,
+            device_ids=[args.local_rank],
+            output_device=args.local_rank,
+            broadcast_buffers=False,
+            find_unused_parameters=True,
+            # 添加gradient_as_bucket_view可以改善某些情况下的性能
+            gradient_as_bucket_view=True
+        )
+
+        # 确保所有进程完成DDP包装
+        dist.barrier()
+    elif cfg.device == 'cuda':
+        model = model.cuda()
+
+    datasets = [build_dataset(cfg.data.train)]
     if len(cfg.workflow) == 2:
         val_dataset = copy.deepcopy(cfg.data.val)
         val_dataset.pipeline = cfg.data.train.pipeline
         datasets.append(build_dataset(val_dataset))
-
-    # checkpoint配置
     if cfg.checkpoint_config is not None:
+        # save mmdet version, config file content and class names in
+        # checkpoints as meta data
         cfg.checkpoint_config.meta = dict(
             mmdet_version=__version__ + get_git_hash()[:7],
             CLASSES=datasets[0].CLASSES)
+    # add an attribute for visualization convenience
+    model.CLASSES = datasets[0].CLASSES
 
-    # 训练扩散模型
     train_detector(
         model,
         datasets,

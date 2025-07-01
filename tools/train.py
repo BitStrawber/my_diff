@@ -185,13 +185,9 @@ def main():
         distributed = False
     else:
         distributed = True
-        # 修改1: 在init_dist前设置正确的设备
-        torch.cuda.set_device(args.local_rank)
         init_dist(args.launcher, **cfg.dist_params)
-        # 修改2: 添加初始化后的同步
-        dist.barrier()
         # re-set gpu_ids with distributed training mode
-        rank, world_size = get_dist_info()
+        _, world_size = get_dist_info()
         cfg.gpu_ids = range(world_size)
 
     # create work_dir
@@ -235,31 +231,6 @@ def main():
         test_cfg=cfg.get('test_cfg'))
     model.init_weights()
 
-    # 修改3: 改进的DDP包装逻辑
-    if distributed:
-        # 确保所有进程完成模型构建
-        dist.barrier()
-
-        # 使用local_rank而不是gpu_id
-        device = torch.device('cuda', args.local_rank)
-        model = model.to(device)
-
-        # 修改4: 更健壮的DDP配置
-        model = torch.nn.parallel.DistributedDataParallel(
-            model,
-            device_ids=[args.local_rank],
-            output_device=args.local_rank,
-            broadcast_buffers=False,
-            find_unused_parameters=True,
-            # 添加gradient_as_bucket_view可以改善某些情况下的性能
-            gradient_as_bucket_view=True
-        )
-
-        # 确保所有进程完成DDP包装
-        dist.barrier()
-    elif cfg.device == 'cuda':
-        model = model.cuda()
-
     datasets = [build_dataset(cfg.data.train)]
     if len(cfg.workflow) == 2:
         val_dataset = copy.deepcopy(cfg.data.val)
@@ -273,7 +244,6 @@ def main():
             CLASSES=datasets[0].CLASSES)
     # add an attribute for visualization convenience
     model.CLASSES = datasets[0].CLASSES
-
     train_detector(
         model,
         datasets,

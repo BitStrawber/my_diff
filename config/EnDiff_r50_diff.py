@@ -163,15 +163,9 @@ data = dict(
 evaluation = dict(interval=1, save_best='auto', classwise=True)
 
 optimizer = dict(
-    type='SGD',
     lr=0.0025,
-    momentum=0.9,
-    weight_decay=0.0001,
     paramwise_cfg=dict(
-        custom_keys={
-            'diffusion': dict(lr_mult=0.1, decay_mult=5.0),
-            'diffusion.net': dict(lr_mult=1.0)  # 扩散网络的学习率
-        }))
+        custom_keys=dict(diffusion=dict(lr_mult=0.1, decay_mult=5.0))))
 
 epoch_iter = 2262
 lr_config = dict(
