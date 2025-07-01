@@ -279,10 +279,51 @@ def main():
         cfg.model,
         train_cfg=cfg.get('train_cfg'),
         test_cfg=cfg.get('test_cfg'))
-    model.init_weights()
 
-    # build dataset - 使用你的HqLqCocoDataset
-    datasets = [build_dataset(cfg.data.train)]
+    # 添加DDP兼容性初始化
+    if distributed:
+        # 确保所有rank同步随机种子
+        set_random_seed(cfg.seed + dist.get_rank())
+
+        # 模型预处理
+        model._is_init = True
+        if hasattr(model, '_setup_trainable_params'):
+            model._setup_trainable_params()
+
+        # 分布式数据并行包装
+        model = torch.nn.parallel.DistributedDataParallel(
+            model.cuda(),
+            device_ids=[torch.cuda.current_device()],
+            output_device=torch.cuda.current_device(),
+            find_unused_parameters=True
+        )
+
+    # 修改数据加载部分
+    def build_compatible_dataset(cfg):
+        dataset = build_dataset(cfg.data.train)
+        if distributed:
+            from mmcv.parallel import collate
+            dataset = torch.utils.data.DataLoader(
+                dataset,
+                batch_size=cfg.data.samples_per_gpu,
+                sampler=torch.utils.data.distributed.DistributedSampler(dataset),
+                collate_fn=collate,
+                num_workers=cfg.data.workers_per_gpu,
+                pin_memory=True
+            )
+        return dataset
+
+    datasets = [build_compatible_dataset(cfg)]
+
+    # 修改训练配置
+    cfg.optimizer_config.grad_clip = dict(max_norm=1.0)
+    if distributed:
+        cfg.optimizer_config.update(dict(
+            _delete_=True,
+            type='DistOptimizerHook',
+            update_interval=1,
+            grad_clip=dict(max_norm=1.0)
+        ))
 
     # 验证集设置
     if len(cfg.workflow) == 2:
