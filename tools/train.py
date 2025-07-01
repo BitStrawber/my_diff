@@ -244,6 +244,17 @@ def main():
             CLASSES=datasets[0].CLASSES)
     # add an attribute for visualization convenience
     model.CLASSES = datasets[0].CLASSES
+
+    # 在train_detector调用前添加
+    if distributed:
+        # 确保模型已正确包装为DDP
+        model = torch.nn.parallel.DistributedDataParallel(
+            model,
+            device_ids=[torch.cuda.current_device()],
+            broadcast_buffers=False,
+            find_unused_parameters=True  # 可能需要这个选项
+        )
+
     train_detector(
         model,
         datasets,
