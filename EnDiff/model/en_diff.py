@@ -12,6 +12,7 @@ from mmdet.models.builder import MODELS
 
 r = 0
 s = [15,60,90]
+test = 0.1
 class MyGaussianBlur(torch.nn.Module):
     # 初始化
     def __init__(self, radius=1, sigema=1.5):
@@ -53,7 +54,7 @@ class EnDiff(BaseModule):
             diffuse_ratio=0.6,
             sample_times=10,
             land_loss_weight=1,
-            uw_loss_weight=1,
+            uw_loss_weight=1*test,
             init_cfg=None,
     ):
         super(EnDiff, self).__init__(init_cfg)
