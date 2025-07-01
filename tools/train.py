@@ -183,7 +183,7 @@ def main():
     # init distributed env first, since logger depends on the dist info.
     if args.launcher == 'none':
         distributed = False
-        else:
+    else:
         distributed = True
         # 修改1: 在init_dist前设置正确的设备
         torch.cuda.set_device(args.local_rank)
