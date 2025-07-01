@@ -102,7 +102,18 @@ lr_config = dict(
 
 # 训练配置
 runner = dict(max_epochs=24)
-checkpoint_config = dict(interval=1)
+# 在配置文件末尾添加
+checkpoint_config = dict(
+    interval=5,
+    max_keep_ckpts=3,  # 最多保留3个检查点
+    save_optimizer=True,  # 保存优化器状态
+    by_epoch=True
+)
+
+# 自动恢复设置
+auto_resume = True
+resume_from = None  # 如果指定路径则从该检查点恢复
+
 evaluation = dict(interval=1, metric='loss')
 log_config = dict(
     interval=50,
