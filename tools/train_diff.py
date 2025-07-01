@@ -153,12 +153,6 @@ def main():
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
 
-    if hasattr(cfg.model, 'diff_cfg') and 'uw_loss_weight' in cfg.model.diff_cfg:
-        original_weight = cfg.model.diff_cfg['uw_loss_weight']
-        cfg.model.diff_cfg['uw_loss_weight'] = original_weight * args.test_num
-        logger.info(
-            f'Adjusted uw_loss_weight: {original_weight} * {args.test_num} = {cfg.model.diff_cfg["uw_loss_weight"]}')
-
     # work_dir is determined in this priority: CLI > segment in file > filename
     if args.work_dir is not None:
         # update configs according to CLI args if args.work_dir is not None
@@ -214,6 +208,12 @@ def main():
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
     log_file = osp.join(cfg.work_dir, f'{timestamp}.log')
     logger = get_root_logger(log_file=log_file, log_level=cfg.log_level)
+
+    if hasattr(cfg.model, 'diff_cfg') and 'uw_loss_weight' in cfg.model.diff_cfg:
+        original_weight = cfg.model.diff_cfg['uw_loss_weight']
+        cfg.model.diff_cfg['uw_loss_weight'] = original_weight * args.test_num
+        logger.info(
+            f'Adjusted uw_loss_weight: {original_weight} * {args.test_num} = {cfg.model.diff_cfg["uw_loss_weight"]}')
 
     # init the meta dict to record some important information such as
     # environment info and seed, which will be logged
