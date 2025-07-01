@@ -1,6 +1,7 @@
 import os
 import torch
 import mmcv
+import glob
 from mmcv.runner import init_dist
 from mmcv.utils import Config
 from mmdet.apis import set_random_seed, train_detector
@@ -80,7 +81,7 @@ def main():
             distributed=distributed,
             validate=True,
             timestamp=mmcv.get_time_str(),
-            meta={'exp_name': 'endiff_pm'}
+            meta={'exp_name': 'diff_pm'}
         )
 
 if __name__ == '__main__':
