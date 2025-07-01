@@ -9,7 +9,7 @@ model = dict(
     type='EnDiffDet',
     init_cfg=dict(
         type='Pretrained',
-        checkpoint='/home/xcx/桌面/my_diff/work_dirs/EnDiff_r50/epoch_2.pth'
+        checkpoint='torchvision://resnet50'
     ),
     diff_cfg=dict(
         type='EnDiff',
