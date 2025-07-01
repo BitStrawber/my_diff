@@ -17,7 +17,7 @@ model = dict(
         diffuse_ratio=0.6,
         sample_times=15,
         land_loss_weight=1,
-        uw_loss_weight=10),
+        uw_loss_weight=1),
     backbone=dict(frozen_stages=-1, init_cfg=None),
     roi_head=dict(
         bbox_head=[

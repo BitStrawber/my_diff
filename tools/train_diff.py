@@ -99,6 +99,12 @@ def parse_args():
         default='both',
         choices=['both', 'diff', 'det'],
         help='训练模式选择: both(联合训练), diff(仅训练扩散模型), det(仅训练检测模型)')
+    parser.add_argument(
+        '--test-num',
+        type=float,
+        default=1.0,
+        help='multiplicative factor for uw_loss_weight in config')
+
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
@@ -146,6 +152,12 @@ def main():
     # set cudnn_benchmark
     if cfg.get('cudnn_benchmark', False):
         torch.backends.cudnn.benchmark = True
+
+    if hasattr(cfg.model, 'diff_cfg') and 'uw_loss_weight' in cfg.model.diff_cfg:
+        original_weight = cfg.model.diff_cfg['uw_loss_weight']
+        cfg.model.diff_cfg['uw_loss_weight'] = original_weight * args.test_num
+        logger.info(
+            f'Adjusted uw_loss_weight: {original_weight} * {args.test_num} = {cfg.model.diff_cfg["uw_loss_weight"]}')
 
     # work_dir is determined in this priority: CLI > segment in file > filename
     if args.work_dir is not None:
