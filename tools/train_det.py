@@ -37,6 +37,12 @@ def parse_args():
         action='store_true',
         help='whether not to evaluate the checkpoint during training')
     group_gpus = parser.add_mutually_exclusive_group()
+    parser.add_argument(
+        '--data-root',
+        type=str,
+        default=None,  # 默认None表示不覆盖
+        help='optional override for data_root in config (default: None)'
+    )
     group_gpus.add_argument(
         '--gpus',
         type=int,
