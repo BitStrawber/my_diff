@@ -13,6 +13,7 @@ from tqdm import tqdm  # 导入进度条库
 import sys
 sys.path.append('./')
 from EnDiff import *
+import argparse
 
 
 # ====== 配置区域 ======
@@ -256,8 +257,19 @@ def init_distributed():
         return True, rank, world_size, gpu
     return False, 0, 1, 0
 
+def parse_args():
+    parser = argparse.ArgumentParser(description='图像增强与标注处理工具')
+    parser.add_argument('--config', default=CONFIG_PATH, help='模型配置文件路径')
+    parser.add_argument('--checkpoint', default=CHECKPOINT_PATH, help='模型权重文件路径')
+    parser.add_argument('--input', default=INPUT_DIR, help='输入图像目录路径')
+    parser.add_argument('--output', default=OUTPUT_DIR, help='输出目录路径')
+    parser.add_argument('--annotation', default=ANNOTATION_PATH, help='COCO标注文件路径')
+    return parser.parse_args()
+
 
 if __name__ == '__main__':
+    # 解析命令行参数
+    args = parse_args()
 
     # 初始化分布式环境
     distributed, rank, world_size, gpu = init_distributed()
@@ -265,8 +277,8 @@ if __name__ == '__main__':
 
     # 加载模型（仅在rank 0打印信息）
     if rank == 0:
-        print("Loading model...")
-    model = load_model(CONFIG_PATH, CHECKPOINT_PATH, device)
+        print(f"Loading model from {args.checkpoint}...")
+    model = load_model(args.config, args.checkpoint, device)
 
     # 模型分布式包装
     if distributed:
@@ -280,17 +292,15 @@ if __name__ == '__main__':
 
     # 处理图像
     if rank == 0:
-        print(f"\nProcessing images from {INPUT_DIR}...")
+        print(f"\nProcessing images from {args.input}...")
 
-    if not os.path.isdir(INPUT_DIR):
-        raise FileNotFoundError(f"Input directory not found: {INPUT_DIR}")
+    if not os.path.isdir(args.input):
+        raise FileNotFoundError(f"Input directory not found: {args.input}")
 
-
-    print(f"\nProcessing images from {INPUT_DIR}...")
-    process_and_save_images(model, INPUT_DIR, OUTPUT_DIR, ANNOTATION_PATH, rank=rank,
-        world_size=world_size)
+    process_and_save_images(model, args.input, args.output, args.annotation,
+                            rank=rank, world_size=world_size)
 
     if rank == 0:
         print(f"\nAll done! Results saved to:")
-        print(f"- Resized images: {os.path.join(OUTPUT_DIR, 'images')}")
-        print(f"- Annotated images: {os.path.join(OUTPUT_DIR, 'visible')}")
+        print(f"- Resized images: {os.path.join(args.output, 'images')}")
+        print(f"- Annotated images: {os.path.join(args.output, 'visible')}")
