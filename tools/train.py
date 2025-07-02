@@ -127,6 +127,15 @@ def main():
 
     cfg = Config.fromfile(args.config)
 
+    # 覆盖模型权重路径（优先级：命令行 > 配置文件）
+    if args.checkpoint is not None:
+        if 'load_from' in cfg:  # 覆盖训练初始权重
+            cfg.load_from = args.checkpoint
+        if 'model' in cfg and 'pretrained' in cfg.model:  # 覆盖骨干网络预训练权重
+            cfg.model.pretrained = args.checkpoint
+        logger = get_root_logger()
+        logger.info(f'Updated model weights path to: {args.checkpoint}')
+
     # replace the ${key} with the value of cfg.key
     cfg = replace_cfg_vals(cfg)
 
@@ -154,15 +163,6 @@ def main():
         # 路径存在性验证
         if not osp.exists(new_prefix):
             logger.warning(f'Specified img_prefix not found: {new_prefix}')
-
-    # 覆盖模型权重路径（优先级：命令行 > 配置文件）
-    if args.checkpoint is not None:
-        if 'load_from' in cfg:  # 覆盖训练初始权重
-            cfg.load_from = args.checkpoint
-        if 'model' in cfg and 'pretrained' in cfg.model:  # 覆盖骨干网络预训练权重
-            cfg.model.pretrained = args.checkpoint
-        logger = get_root_logger()
-        logger.info(f'Updated model weights path to: {args.checkpoint}')
 
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
