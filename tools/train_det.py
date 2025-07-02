@@ -193,17 +193,10 @@ def main():
     if args.data_root is not None:
         if 'data_root' in cfg:
             original_root = cfg.data_root
-            # 替换所有相关路径（兼容嵌套结构）
-            for subset in ['train', 'val', 'test']:
-                if subset in cfg.data:
-                    if 'ann_file' in cfg.data[subset]:
-                        cfg.data[subset]['ann_file'] = cfg.data[subset]['ann_file'].replace(
-                            original_root, args.data_root)
-                    if 'img_prefix' in cfg.data[subset]:
-                        cfg.data[subset]['img_prefix'] = cfg.data[subset]['img_prefix'].replace(
-                            original_root, args.data_root)
+            # 仅更新data_root，不修改标注文件路径
             cfg.data_root = args.data_root
-            logger.info(f'Overriding data_root from {original_root} to {args.data_root}')
+            logger.info(f'Overriding data_root from {original_root} to {args.data_root}, '
+                        f'annotations remain unchanged')
 
     # init the meta dict to record some important information such as
     # environment info and seed, which will be logged
