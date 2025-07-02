@@ -37,11 +37,12 @@ def parse_args():
         action='store_true',
         help='whether not to evaluate the checkpoint during training')
     group_gpus = parser.add_mutually_exclusive_group()
+    # 新增：data-root参数
     parser.add_argument(
         '--data-root',
         type=str,
-        default=None,  # 默认None表示不覆盖
-        help='optional override for data_root in config (default: None)'
+        default=None,
+        help='override data_root in config without modifying annotation paths'
     )
     group_gpus.add_argument(
         '--gpus',
@@ -122,6 +123,18 @@ def main():
     # update data root according to MMDET_DATASETS
     update_data_root(cfg)
 
+    if args.data_root is not None:
+        if 'data_root' in cfg:
+            original_root = cfg.data_root
+            cfg.data_root = args.data_root
+            # 记录修改行为（不修改标注路径）
+            logger = get_root_logger()
+            logger.info(
+                f'Command-line --data-root override: '
+                f'{original_root} -> {args.data_root}\n'
+                f'Note: Annotation paths remain unchanged.'
+            )
+
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
 
@@ -188,15 +201,6 @@ def main():
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
     log_file = osp.join(cfg.work_dir, f'{timestamp}.log')
     logger = get_root_logger(log_file=log_file, log_level=cfg.log_level)
-
-    # 新增：仅在--data-root显式指定时覆盖
-    if args.data_root is not None:
-        if 'data_root' in cfg:
-            original_root = cfg.data_root
-            # 仅更新data_root，不修改标注文件路径
-            cfg.data_root = args.data_root
-            logger.info(f'Overriding data_root from {original_root} to {args.data_root}, '
-                        f'annotations remain unchanged')
 
     # init the meta dict to record some important information such as
     # environment info and seed, which will be logged
