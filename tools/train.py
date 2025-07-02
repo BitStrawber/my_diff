@@ -45,6 +45,13 @@ def parse_args():
         type=int,
         help='(Deprecated, please use --gpu-id) number of gpus to use '
         '(only applicable to non-distributed training)')
+    parser.add_argument(
+        '--img-prefix',  # 参数名改为img-prefix
+        type=str,
+        default=None,
+        help='override img_prefix paths for train/val/test subsets '
+             'while keeping original data_root and annotations'
+    )
     group_gpus.add_argument(
         '--gpu-ids',
         type=int,
@@ -124,6 +131,28 @@ def main():
 
     # update data root according to MMDET_DATASETS
     update_data_root(cfg)
+
+    # 核心修改：仅处理img_prefix的覆盖
+    if args.img_prefix is not None:
+        new_prefix = osp.normpath(args.img_prefix)
+        logger = get_root_logger()
+
+        def update_img_prefix(subset_cfg):
+            if 'img_prefix' in subset_cfg:
+                original_path = subset_cfg['img_prefix']
+                subset_cfg['img_prefix'] = new_prefix
+                logger.info(f'Updated {subset_name} img_prefix: {original_path} -> {new_prefix}')
+            if 'dataset' in subset_cfg:  # 处理嵌套数据集
+                update_img_prefix(subset_cfg['dataset'])
+
+        # 遍历所有数据子集
+        for subset_name in ['train', 'val', 'test']:
+            if subset_name in cfg.data:
+                update_img_prefix(cfg.data[subset_name])
+
+        # 路径存在性验证
+        if not osp.exists(new_prefix):
+            logger.warning(f'Specified img_prefix not found: {new_prefix}')
 
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
