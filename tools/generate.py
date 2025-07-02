@@ -22,7 +22,7 @@ import argparse
 # INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
 # OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
 # ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'
-CONFIG_PATH = './config/diff.py'
+CONFIG_PATH = './config/EnDiff_r50_diff.py'
 CHECKPOINT_PATH = './work_dirs/EnDiff_r50/epoch_1.pth'
 INPUT_DIR = '/home/xcx/桌面/synthetic_dataset/blended_images'
 OUTPUT_DIR = '/home/xcx/桌面/temp'
