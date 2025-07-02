@@ -37,12 +37,12 @@ def parse_args():
         action='store_true',
         help='whether not to evaluate the checkpoint during training')
     group_gpus = parser.add_mutually_exclusive_group()
-    # 新增：data-root参数
     parser.add_argument(
-        '--data-root',
+        '--img-prefix',  # 参数名改为img-prefix
         type=str,
         default=None,
-        help='override data_root in config without modifying annotation paths'
+        help='override img_prefix paths for train/val/test subsets '
+             'while keeping original data_root and annotations'
     )
     group_gpus.add_argument(
         '--gpus',
@@ -123,41 +123,27 @@ def main():
     # update data root according to MMDET_DATASETS
     update_data_root(cfg)
 
-    # 原始路径备份与动态修改
-    if args.data_root is not None:
-        original_root = cfg.get('data_root', '')
-        new_root = osp.normpath(args.data_root)  # 规范化路径格式
-
-        # 递归更新所有数据子集的img_prefix
-        def update_prefix(dataset_cfg):
-            if 'img_prefix' in dataset_cfg:
-                old_prefix = dataset_cfg['img_prefix']
-                if osp.isabs(old_prefix):
-                    # 绝对路径替换根目录部分
-                    dataset_cfg['img_prefix'] = old_prefix.replace(original_root, new_root)
-                else:
-                    # 相对路径转为基于新data_root的绝对路径
-                    dataset_cfg['img_prefix'] = osp.join(new_root, old_prefix)
-            if 'dataset' in dataset_cfg:  # 处理嵌套数据集（如ConcatDataset）
-                update_prefix(dataset_cfg['dataset'])
-
-        # 更新data_root和所有子集路径
-        cfg.data_root = new_root
-        for subset in ['train', 'val', 'test']:
-            if subset in cfg.data:
-                update_prefix(cfg.data[subset])
-
-        # 日志记录（带路径验证）
+    # 核心修改：仅处理img_prefix的覆盖
+    if args.img_prefix is not None:
+        new_prefix = osp.normpath(args.img_prefix)
         logger = get_root_logger()
-        logger.info(
-            f'Data root updated:\n'
-            f'- Old: {original_root}\n'
-            f'- New: {new_root}\n'
-            f'- Train images: {cfg.data["train"].get("img_prefix", "N/A")}\n'
-            f'- Val images: {cfg.data["val"].get("img_prefix", "N/A")}'
-        )
-        if not osp.exists(new_root):
-            logger.warning(f'New data root not found: {new_root}')
+
+        def update_img_prefix(subset_cfg):
+            if 'img_prefix' in subset_cfg:
+                original_path = subset_cfg['img_prefix']
+                subset_cfg['img_prefix'] = new_prefix
+                logger.info(f'Updated {subset_name} img_prefix: {original_path} -> {new_prefix}')
+            if 'dataset' in subset_cfg:  # 处理嵌套数据集
+                update_img_prefix(subset_cfg['dataset'])
+
+        # 遍历所有数据子集
+        for subset_name in ['train', 'val', 'test']:
+            if subset_name in cfg.data:
+                update_img_prefix(cfg.data[subset_name])
+
+        # 路径存在性验证
+        if not osp.exists(new_prefix):
+            logger.warning(f'Specified img_prefix not found: {new_prefix}')
 
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
