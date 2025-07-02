@@ -123,16 +123,35 @@ def main():
     # update data root according to MMDET_DATASETS
     update_data_root(cfg)
 
+    # Step 1: 处理--data-root参数
     if args.data_root is not None:
         if 'data_root' in cfg:
             original_root = cfg.data_root
-            cfg.data_root = args.data_root
-            # 记录修改行为（不修改标注路径）
+            new_root = args.data_root
+
+            # Step 1.1: 更新data_root
+            cfg.data_root = new_root
+
+            # Step 1.2: 遍历train/val/test，更新img_prefix
+            for subset in ['train', 'val', 'test']:
+                if subset in cfg.data and 'img_prefix' in cfg.data[subset]:
+                    old_prefix = cfg.data[subset]['img_prefix']
+                    # 保留原相对路径（如"images/train"），仅替换根目录
+                    if old_prefix.startswith(original_root):
+                        relative_path = old_prefix[len(original_root):].lstrip('/')
+                        new_prefix = osp.join(new_root, relative_path)
+                    else:
+                        new_prefix = old_prefix  # 若为绝对路径或其他情况，保持原样
+                    cfg.data[subset]['img_prefix'] = new_prefix
+
+            # 记录日志
             logger = get_root_logger()
             logger.info(
-                f'Command-line --data-root override: '
-                f'{original_root} -> {args.data_root}\n'
-                f'Note: Annotation paths remain unchanged.'
+                f'Updated data_root and img_prefix:\n'
+                f'- Old data_root: {original_root}\n'
+                f'- New data_root: {new_root}\n'
+                f'- Train img_prefix: {cfg.data["train"].get("img_prefix", "N/A")}\n'
+                f'- Val img_prefix: {cfg.data["val"].get("img_prefix", "N/A")}'
             )
 
     if args.cfg_options is not None:
