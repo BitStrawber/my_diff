@@ -6,7 +6,8 @@ _base_ = [
 ]
 
 # 自定义数据集路径
-data_root = '/media/HDD0/XCX/synthetic_dataset/'
+# data_root = '/media/HDD0/XCX/synthetic_dataset/'
+data_root = '/media/HDD0/XCX/compare/det05/'
 train_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2_train_merge.json'
 test_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2_val_merge.json'
 classes = [
