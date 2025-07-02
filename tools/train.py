@@ -52,6 +52,7 @@ def parse_args():
         help='override img_prefix paths for train/val/test subsets '
              'while keeping original data_root and annotations'
     )
+    parser.add_argument('--checkpoint', default=None, help='模型权重文件路径')
     group_gpus.add_argument(
         '--gpu-ids',
         type=int,
@@ -153,6 +154,15 @@ def main():
         # 路径存在性验证
         if not osp.exists(new_prefix):
             logger.warning(f'Specified img_prefix not found: {new_prefix}')
+
+    # 覆盖模型权重路径（优先级：命令行 > 配置文件）
+    if args.checkpoint is not None:
+        if 'load_from' in cfg:  # 覆盖训练初始权重
+            cfg.load_from = args.checkpoint
+        if 'model' in cfg and 'pretrained' in cfg.model:  # 覆盖骨干网络预训练权重
+            cfg.model.pretrained = args.checkpoint
+        logger = get_root_logger()
+        logger.info(f'Updated model weights path to: {args.checkpoint}')
 
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
