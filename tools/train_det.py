@@ -183,6 +183,22 @@ def main():
     log_file = osp.join(cfg.work_dir, f'{timestamp}.log')
     logger = get_root_logger(log_file=log_file, log_level=cfg.log_level)
 
+    # 新增：仅在--data-root显式指定时覆盖
+    if args.data_root is not None:
+        if 'data_root' in cfg:
+            original_root = cfg.data_root
+            # 替换所有相关路径（兼容嵌套结构）
+            for subset in ['train', 'val', 'test']:
+                if subset in cfg.data:
+                    if 'ann_file' in cfg.data[subset]:
+                        cfg.data[subset]['ann_file'] = cfg.data[subset]['ann_file'].replace(
+                            original_root, args.data_root)
+                    if 'img_prefix' in cfg.data[subset]:
+                        cfg.data[subset]['img_prefix'] = cfg.data[subset]['img_prefix'].replace(
+                            original_root, args.data_root)
+            cfg.data_root = args.data_root
+            logger.info(f'Overriding data_root from {original_root} to {args.data_root}')
+
     # init the meta dict to record some important information such as
     # environment info and seed, which will be logged
     meta = dict()
