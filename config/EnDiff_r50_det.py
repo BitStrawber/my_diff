@@ -83,17 +83,17 @@ data = dict(
     workers_per_gpu=4,     # 数据加载线程数
     train=dict(
         ann_file=train_ann,
-        img_prefix=data_root,
+        img_prefix=data_root+'images/',
         classes=classes,
     ),
     val=dict(
         ann_file=test_ann,
-        img_prefix=data_root,
+        img_prefix=data_root+'images/',
         classes=classes,
     ),
     test=dict(
         ann_file=test_ann,
-        img_prefix=data_root,
+        img_prefix=data_root+'images/',
         classes=classes,
     )
 )

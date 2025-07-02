@@ -123,36 +123,41 @@ def main():
     # update data root according to MMDET_DATASETS
     update_data_root(cfg)
 
-    # Step 1: 处理--data-root参数
+    # 原始路径备份与动态修改
     if args.data_root is not None:
-        if 'data_root' in cfg:
-            original_root = cfg.data_root
-            new_root = args.data_root
+        original_root = cfg.get('data_root', '')
+        new_root = osp.normpath(args.data_root)  # 规范化路径格式
 
-            # Step 1.1: 更新data_root
-            cfg.data_root = new_root
+        # 递归更新所有数据子集的img_prefix
+        def update_prefix(dataset_cfg):
+            if 'img_prefix' in dataset_cfg:
+                old_prefix = dataset_cfg['img_prefix']
+                if osp.isabs(old_prefix):
+                    # 绝对路径替换根目录部分
+                    dataset_cfg['img_prefix'] = old_prefix.replace(original_root, new_root)
+                else:
+                    # 相对路径转为基于新data_root的绝对路径
+                    dataset_cfg['img_prefix'] = osp.join(new_root, old_prefix)
+            if 'dataset' in dataset_cfg:  # 处理嵌套数据集（如ConcatDataset）
+                update_prefix(dataset_cfg['dataset'])
 
-            # Step 1.2: 遍历train/val/test，更新img_prefix
-            for subset in ['train', 'val', 'test']:
-                if subset in cfg.data and 'img_prefix' in cfg.data[subset]:
-                    old_prefix = cfg.data[subset]['img_prefix']
-                    # 保留原相对路径（如"images/train"），仅替换根目录
-                    if old_prefix.startswith(original_root):
-                        relative_path = old_prefix[len(original_root):].lstrip('/')
-                        new_prefix = osp.join(new_root, relative_path)
-                    else:
-                        new_prefix = old_prefix  # 若为绝对路径或其他情况，保持原样
-                    cfg.data[subset]['img_prefix'] = new_prefix
+        # 更新data_root和所有子集路径
+        cfg.data_root = new_root
+        for subset in ['train', 'val', 'test']:
+            if subset in cfg.data:
+                update_prefix(cfg.data[subset])
 
-            # 记录日志
-            logger = get_root_logger()
-            logger.info(
-                f'Updated data_root and img_prefix:\n'
-                f'- Old data_root: {original_root}\n'
-                f'- New data_root: {new_root}\n'
-                f'- Train img_prefix: {cfg.data["train"].get("img_prefix", "N/A")}\n'
-                f'- Val img_prefix: {cfg.data["val"].get("img_prefix", "N/A")}'
-            )
+        # 日志记录（带路径验证）
+        logger = get_root_logger()
+        logger.info(
+            f'Data root updated:\n'
+            f'- Old: {original_root}\n'
+            f'- New: {new_root}\n'
+            f'- Train images: {cfg.data["train"].get("img_prefix", "N/A")}\n'
+            f'- Val images: {cfg.data["val"].get("img_prefix", "N/A")}'
+        )
+        if not osp.exists(new_root):
+            logger.warning(f'New data root not found: {new_root}')
 
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
