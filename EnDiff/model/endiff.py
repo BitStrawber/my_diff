@@ -45,8 +45,42 @@ class MyGaussianBlur(torch.nn.Module):
         new_pic2 = torch.nn.functional.conv2d(image, weight, padding=self.radius, groups=3)
         return new_pic2
 
+def sinkhorn_wasserstein(x, y, p=2, blur=0.05, scaling=0.5, iterations=50):
+    """
+    改进的Sinkhorn近似，支持多通道空间特征
+    Args:
+        x, y: (B, C, H, W) 的光场特征
+        blur: 熵正则化系数（建议0.01~0.1）
+    """
+    B, C, H, W = x.shape
+    x = x.reshape(B, C, -1)  # (B, C, H*W)
+    y = y.reshape(B, C, -1)
+
+    # 计算逐通道的Wasserstein距离
+    total_dist = 0
+    for c in range(C):
+        # 计算成本矩阵（L2距离）
+        x_c = x[:, c].unsqueeze(2)  # (B, H*W, 1)
+        y_c = y[:, c].unsqueeze(1)  # (B, 1, H*W)
+        C = (x_c - y_c).norm(p=p, dim=-1)  # (B, H*W, H*W)
+
+        # Sinkhorn迭代
+        K = torch.exp(-C / blur)
+        u = torch.ones(B, H * W, device=x.device) / (H * W)
+        v = torch.ones(B, H * W, device=y.device) / (H * W)
+
+        for _ in range(iterations):
+            u = 1.0 / (K @ (v / (K.transpose(1, 2) @ u).clamp_min(1e-6))) ** scaling
+            v = 1.0 / (K.transpose(1, 2) @ u) ** scaling
+
+        # 计算当前通道的距离
+        P = u.unsqueeze(2) * K * v.unsqueeze(1)
+        total_dist += (P * C).sum(dim=(1, 2)).mean()  # 批平均
+
+    return total_dist / C  # 多通道平均
+
 @MODELS.register_module()
-class EnDiff(BaseModule):
+class EnDiff0(BaseModule):
     def __init__(
             self,
             net,
@@ -57,7 +91,7 @@ class EnDiff(BaseModule):
             uw_loss_weight=1*test,
             init_cfg=None,
     ):
-        super(EnDiff, self).__init__(init_cfg)
+        super(EnDiff0, self).__init__(init_cfg)
         self.net = MODELS.build(net)
         self.T = T
         self.diffuse_ratio = diffuse_ratio
@@ -119,12 +153,13 @@ class EnDiff(BaseModule):
         r_prev_lf = self.MutiScaleLuminanceEstimation(r_prev)
         h_prev_lf = self.MutiScaleLuminanceEstimation(h_prev)
 
-        r = torch.flatten(r_prev_lf, 1)
-        h = torch.flatten(h_prev_lf, 1)
-        r = F.log_softmax(r, dim=-1)
-        h = F.log_softmax(h, dim=-1)
+        # 可选：对每个空间位置独立归一化（替代全局softmax）
+        r_normalized = F.layer_norm(r_prev_lf, [H, W])  # 保持空间结构
+        h_normalized = F.layer_norm(h_prev_lf, [H, W])
+
         # 计算光场特征的 L1 损失
-        land_loss = F.kl_div(r, h, log_target=True, reduction='batchmean') * self.land_loss_weight
+        land_loss = sinkhorn_wasserstein(r_normalized, h_normalized) * self.land_loss_weight
+        # land_loss = F.kl_div(r, h, log_target=True, reduction='batchmean') * self.land_loss_weight
 
         uw_loss = F.mse_loss(noise_pred, noise_gt, reduction='mean') * self.uw_loss_weight
         return dict(land_loss=land_loss, uw_loss=uw_loss)
