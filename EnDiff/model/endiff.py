@@ -10,74 +10,84 @@ import numpy as np
 from mmcv.runner import BaseModule
 from mmdet.models.builder import MODELS
 
-r = 0
-s = [15,60,90]
 test = 0.1
+
+
+# =============================================================================
+# === NEW LOSS FUNCTION: Sliced-Wasserstein Distance (Computationally Feasible) ===
+# =============================================================================
+def sliced_wasserstein_distance(x, y, n_projections=64, p=2):
+    """
+    Computes the Sliced-Wasserstein Distance between two feature maps.
+    Args:
+        x, y: Input feature maps of shape (B, C, H, W).
+        n_projections: The number of random projections to use.
+        p: The norm to use for the 1D Wasserstein distance (1 or 2).
+    """
+    B, C, H, W = x.shape
+    device = x.device
+
+    # Flatten the spatial dimensions
+    x_flat = x.view(B, C, -1)  # (B, C, N)
+    y_flat = y.view(B, C, -1)  # (B, C, N)
+
+    # Generate random projection vectors
+    projections = torch.randn(C, n_projections, device=device).T  # (n_projections, C)
+    projections = F.normalize(projections, p=2, dim=1)  # Normalize projections
+
+    # Project the features
+    # (B, C, N) -> (B, N, C) @ (C, n_projections) -> (B, N, n_projections)
+    x_proj = x_flat.permute(0, 2, 1).matmul(projections.T)
+    y_proj = y_flat.permute(0, 2, 1).matmul(projections.T)
+
+    # Sort the projections to compute the 1D Wasserstein distance
+    x_proj_sorted, _ = torch.sort(x_proj, dim=1)
+    y_proj_sorted, _ = torch.sort(y_proj, dim=1)
+
+    # Calculate the L_p distance between sorted projections
+    # This is the 1D Wasserstein distance
+    dist = torch.abs(x_proj_sorted - y_proj_sorted)
+    if p == 1:
+        w_dist = torch.mean(dist, dim=1)
+    elif p == 2:
+        w_dist = torch.sqrt(torch.mean(dist ** 2, dim=1))
+    else:
+        raise ValueError("p must be 1 or 2")
+
+    # Average over all projections and the batch
+    return w_dist.mean()
+
+
 class MyGaussianBlur(torch.nn.Module):
-    # 初始化
     def __init__(self, radius=1, sigema=1.5):
         super(MyGaussianBlur, self).__init__()
         self.radius = radius
         self.sigema = sigema
 
-    # 高斯的计算公式
     def calc(self, x, y):
         res1 = 1 / (2 * math.pi * self.sigema * self.sigema)
         res2 = math.exp(-(x * x + y * y) / (2 * self.sigema * self.sigema))
         return res1 * res2
 
-    # 滤波模板
     def template(self):
         sideLength = self.radius * 2 + 1
         result = np.zeros((sideLength, sideLength))
-        for i in range(0, sideLength):
-            for j in range(0, sideLength):
+        for i in range(sideLength):
+            for j in range(sideLength):
                 result[i, j] = self.calc(i - self.radius, j - self.radius)
         all = result.sum()
         return result / all
 
-    # 滤波函数
     def filter(self, image, template):
-        kernel = torch.FloatTensor(template).cuda()
-        kernel2 = kernel.view(1, 1, *kernel.shape)  # 将二维张量扩展为四维张量
-        kernel2 = kernel2.expand(3, 1, *kernel.shape)  # 扩展为 [3, 1, 2 * r + 1, 2 * r + 1]
-        weight = torch.nn.Parameter(data=kernel2, requires_grad=False)
-        new_pic2 = torch.nn.functional.conv2d(image, weight, padding=self.radius, groups=3)
-        return new_pic2
+        device = image.device
+        kernel = torch.FloatTensor(template).to(device)
+        kernel = kernel.view(1, 1, *kernel.shape)
 
-def sinkhorn_wasserstein(x, y, p=2, blur=0.05, scaling=0.5, iterations=50):
-    """
-    改进的Sinkhorn近似，支持多通道空间特征
-    Args:
-        x, y: (B, C, H, W) 的光场特征
-        blur: 熵正则化系数（建议0.01~0.1）
-    """
-    B, C, H, W = x.shape
-    x = x.reshape(B, C, -1)  # (B, C, H*W)
-    y = y.reshape(B, C, -1)
+        num_channels = image.shape[1]
+        kernel = kernel.expand(num_channels, 1, *kernel.shape[2:])
+        weight = torch.nn.Parameter(data=kernel, requires_grad=False)
+        return F.conv2d(image, weight, padding=self.radius, groups=num_channels)
 
-    # 计算逐通道的Wasserstein距离
-    total_dist = 0
-    for c in range(C):
-        # 计算成本矩阵（L2距离）
-        x_c = x[:, c].unsqueeze(2)  # (B, H*W, 1)
-        y_c = y[:, c].unsqueeze(1)  # (B, 1, H*W)
-        C = (x_c - y_c).norm(p=p, dim=-1)  # (B, H*W, H*W)
-
-        # Sinkhorn迭代
-        K = torch.exp(-C / blur)
-        u = torch.ones(B, H * W, device=x.device) / (H * W)
-        v = torch.ones(B, H * W, device=y.device) / (H * W)
-
-        for _ in range(iterations):
-            u = 1.0 / (K @ (v / (K.transpose(1, 2) @ u).clamp_min(1e-6))) ** scaling
-            v = 1.0 / (K.transpose(1, 2) @ u) ** scaling
-
-        # 计算当前通道的距离
-        P = u.unsqueeze(2) * K * v.unsqueeze(1)
-        total_dist += (P * C).sum(dim=(1, 2)).mean()  # 批平均
-
-    return total_dist / C  # 多通道平均
 
 @MODELS.register_module()
 class EnDiff0(BaseModule):
@@ -88,7 +98,7 @@ class EnDiff0(BaseModule):
             diffuse_ratio=0.6,
             sample_times=10,
             land_loss_weight=1,
-            uw_loss_weight=1*test,
+            uw_loss_weight=1 * test,
             init_cfg=None,
     ):
         super(EnDiff0, self).__init__(init_cfg)
@@ -99,32 +109,26 @@ class EnDiff0(BaseModule):
         self.t_end = int(self.T * self.diffuse_ratio)
         self.land_loss_weight = land_loss_weight
         self.uw_loss_weight = uw_loss_weight
-
         self.f_0 = math.cos(0.008 / 1.008 * math.pi / 2) ** 2
-        self.t_list = list(range(0, self.t_end, self.t_end // self.sample_times)) + [self.t_end]
-        # 初始化 L1 损失
+        step = max(1, self.t_end // self.sample_times)
+        self.t_list = list(range(0, self.t_end, step)) + [self.t_end]
         self.L1 = nn.L1Loss()
-
-        # 初始化计数器
         self.counter = 0
 
-    # 光场滤波器，获得光场信息并返回
     def MutiScaleLuminanceEstimation(self, img):
-        guas_15 = MyGaussianBlur(radius=15, sigema=15).cuda()
-        temp_15 = guas_15.template()
+        if not hasattr(self, 'guas_15'):
+            device = img.device
+            self.guas_15 = MyGaussianBlur(radius=15, sigema=15).to(device)
+            self.temp_15 = self.guas_15.template()
+            self.guas_60 = MyGaussianBlur(radius=60, sigema=60).to(device)
+            self.temp_60 = self.guas_60.template()
+            self.guas_90 = MyGaussianBlur(radius=90, sigema=90).to(device)
+            self.temp_90 = self.guas_90.template()
 
-        guas_60 = MyGaussianBlur(radius=60, sigema=60).cuda()
-        temp_60 = guas_60.template()
-
-        guas_90 = MyGaussianBlur(radius=90, sigema=90).cuda()
-        temp_90 = guas_90.template()
-
-        x_15 = guas_15.filter(img, temp_15)
-        x_60 = guas_60.filter(img, temp_60)
-        x_90 = guas_90.filter(img, temp_90)
-
-        img = (x_15 + x_60 + x_90) / 3
-        return img
+        x_15 = self.guas_15.filter(img, self.temp_15)
+        x_60 = self.guas_60.filter(img, self.temp_60)
+        x_90 = self.guas_90.filter(img, self.temp_90)
+        return (x_15 + x_60 + x_90) / 3
 
     def get_alpha_cumprod(self, t: torch.Tensor):
         return (torch.cos((t / self.T + 0.008) / 1.008 * math.pi / 2) ** 2 / self.f_0)[:, None, None, None]
@@ -136,73 +140,70 @@ class EnDiff0(BaseModule):
         xt = torch.sqrt(alpha_cumprod) * x0 + torch.sqrt(1 - alpha_cumprod) * noise
         return xt, noise
 
-    # 根据图像与时间步长返回加噪后的图像与加上的噪声
-
-    # 在 predict 方法中添加调试信息
     def predict(self, et: torch.Tensor, u0: torch.Tensor, t: torch.Tensor):
         e0 = self.net(et, t, u0)
-        alpha_cumprod = self.get_alpha_cumprod(t)
-        alpha_cumprod_prev = self.get_alpha_cumprod(t - (self.t_end // self.sample_times))
-        noise = (et - torch.sqrt(alpha_cumprod) * e0) / torch.sqrt(1 - alpha_cumprod)
-        e_prev = torch.sqrt(alpha_cumprod_prev) * e0 + torch.sqrt(1 - alpha_cumprod_prev) * noise
+        device = et.device
+        alpha_cumprod = self.get_alpha_cumprod(t).to(device)
+        time_step = max(1, self.t_end // self.sample_times)
+        t_prev = (t - time_step).clamp_min(0)
+        alpha_cumprod_prev = self.get_alpha_cumprod(t_prev).to(device)
+        sqrt_one_minus_alpha_cumprod = torch.sqrt(1.0 - alpha_cumprod).clamp_min(1e-6)
+        noise = (et - torch.sqrt(alpha_cumprod) * e0) / sqrt_one_minus_alpha_cumprod
+        e_prev = torch.sqrt(alpha_cumprod_prev) * e0 + torch.sqrt(1.0 - alpha_cumprod_prev) * noise
         return e0, e_prev, noise
 
+    # =============================================================================
+    # === UPDATED LOSS: Calling the new Sliced-Wasserstein function             ===
+    # =============================================================================
     def loss(self, r_prev: torch.Tensor, h_prev: torch.Tensor, noise_pred: torch.Tensor, noise_gt: torch.Tensor):
-
-        # # 提取光场特征
         r_prev_lf = self.MutiScaleLuminanceEstimation(r_prev)
         h_prev_lf = self.MutiScaleLuminanceEstimation(h_prev)
 
-        # 可选：对每个空间位置独立归一化（替代全局softmax）
-        r_normalized = F.layer_norm(r_prev_lf, [H, W])  # 保持空间结构
-        h_normalized = F.layer_norm(h_prev_lf, [H, W])
-
-        # 计算光场特征的 L1 损失
-        land_loss = sinkhorn_wasserstein(r_normalized, h_normalized) * self.land_loss_weight
-        # land_loss = F.kl_div(r, h, log_target=True, reduction='batchmean') * self.land_loss_weight
+        # Calculate land_loss using the new, efficient Sliced-Wasserstein Distance
+        land_loss = sliced_wasserstein_distance(r_prev_lf, h_prev_lf) * self.land_loss_weight
 
         uw_loss = F.mse_loss(noise_pred, noise_gt, reduction='mean') * self.uw_loss_weight
+
         return dict(land_loss=land_loss, uw_loss=uw_loss)
 
     def forward_train(self, u0: torch.Tensor, h0: torch.Tensor):
+        # This function should be fine as it is.
+        device = u0.device
+        batch_size = u0.shape[0]
+
         train_idx = random.randint(1, len(self.t_list) - 1)
-        rs, noise_gt = self.q_diffuse(u0, torch.full((1,), self.t_end, device=u0.device))  # 低质量图像加噪结果，加噪到底
+        rs, noise_gt = self.q_diffuse(u0, torch.full((batch_size,), self.t_end, device=device, dtype=torch.long))
 
         rt_prev = rs
-        for i, t in enumerate(self.t_list[:train_idx - 1:-1]):
-            _, rt_prev, noise_pred = self.predict(rt_prev, u0, torch.full((1,), t, device=u0.device))
+        noise_pred = None
 
-        ht_prev, _ = self.q_diffuse(h0, torch.full((1,), self.t_list[train_idx - 1], device=u0.device))  # 高质量图像加噪结果
+        for t_val in reversed(self.t_list[train_idx:]):
+            _, rt_prev, noise_pred = self.predict(rt_prev, u0,
+                                                  torch.full((batch_size,), t_val, device=device, dtype=torch.long))
+        if noise_pred is None:
+            _, rt_prev, noise_pred = self.predict(rt_prev, u0, torch.full((batch_size,), self.t_list[-1], device=device,
+                                                                          dtype=torch.long))
 
+        ht_prev, _ = self.q_diffuse(h0, torch.full((batch_size,), self.t_list[train_idx - 1], device=device,
+                                                   dtype=torch.long))
         return self.loss(rt_prev, ht_prev, noise_pred, noise_gt)
 
-    # 输入第质量与高质量图像，向loss中输入（预测去噪结果，真实目标数据，预测噪声，真实噪声）：
-
     def forward_test(self, u0):
-
-        # save_path = '/home/xcx/桌面/temp0'
-        rs, _ = self.q_diffuse(u0, torch.full((1,), self.t_end, device=u0.device))
+        device = u0.device
+        batch_size = u0.shape[0]
+        rs, _ = self.q_diffuse(u0, torch.full((batch_size,), self.t_end, device=device, dtype=torch.long))
 
         rt_prev = rs
-        for i, t in enumerate(self.t_list[:1:-1]):
-            r0, rt_prev, _ = self.predict(rt_prev, u0, torch.full((1,), t, device=u0.device))
-
-        # temp = r0
-        # # 将 r0 转换为 [0, 1] 范围
-        # temp = (temp - temp.min()) / (temp.max() - temp.min())
-        # # 生成文件名
-        # filename = f'output_image_{self.counter:04d}.png'  # 按序号生成文件名
-        # self.counter += 1  # 递增计数器
-        # # 保存图像
-        # save_path_full = os.path.join(save_path, filename)
-        # vutils.save_image(temp, save_path_full, normalize=True)
-
+        r0 = rt_prev
+        for t_val in reversed(self.t_list[1:]):
+            r0, rt_prev, _ = self.predict(rt_prev, u0,
+                                          torch.full((batch_size,), t_val, device=device, dtype=torch.long))
         return r0
 
     def forward(self, u0: torch.Tensor, h0: torch.Tensor = None, return_loss: bool = True):
+        # Your working forward logic
         if return_loss:
             assert h0 is not None
             return self.forward_train(u0, h0)
         else:
             return self.forward_test(u0)
-
