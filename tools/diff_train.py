@@ -1,92 +1,40 @@
 # Copyright (c) OpenMMLab. All rights reserved.
 import argparse
 import copy
-import json
 import os
 import os.path as osp
 import time
 import warnings
 
-import mmcv
 import torch
+import mmcv
 import torch.distributed as dist
 from mmcv import Config, DictAction
 from mmcv.runner import get_dist_info, init_dist
 from mmcv.utils import get_git_hash
 
 from mmdet import __version__
-from mmdet.apis import init_random_seed, set_random_seed, train_detector
+# 【修改1】移除 mmdet.apis.train_detector，因为我们将使用 mmcv 的 runner
+# from mmdet.apis import train_detector
+from mmdet.apis import init_random_seed, set_random_seed
 from mmdet.datasets import build_dataset
 from mmdet.models import build_detector
 from mmdet.utils import (collect_env, get_device, get_root_logger,
                          replace_cfg_vals, setup_multi_processes,
                          update_data_root)
-import sys
-sys.path.append('./')
-from EnDiff import *
+# 【修改2】导入 mmcv 的 EpochBasedRunner 和 build_optimizer
+from mmcv.runner import (EpochBasedRunner, build_optimizer,
+                         build_runner)
 
 
-def check_data_paths(cfg):
-    """检查所有数据路径是否存在"""
-    required_paths = [
-        cfg.data.train.ann_file,
-        cfg.data.train.img_prefix,
-        cfg.data.val.ann_file,
-        cfg.data.val.img_prefix
-    ]
+# 【修改3】移除不必要的导入
+# import sys
+# sys.path.append('./')
+# from EnDiff import *
 
-    missing_paths = []
-    for path in required_paths:
-        if not osp.exists(path):
-            missing_paths.append(path)
-
-    if missing_paths:
-        raise FileNotFoundError(
-            f"以下路径不存在:\n{'n'.join(missing_paths)}\n"
-            f"当前工作目录: {os.getcwd()}"
-        )
-    else:
-        print("✅ 所有数据路径验证通过")
-
-
-def validate_dataset(cfg):
-    """全面验证数据集完整性"""
-    # 1. 路径检查
-    print("\n=== 正在检查数据路径 ===")
-    check_data_paths(cfg)
-
-    # 2. 标注文件检查
-    print("\n=== 正在检查标注文件 ===")
-    for phase in ['train', 'val']:
-        ann_file = getattr(cfg.data, phase).ann_file
-        try:
-            with open(ann_file) as f:
-                ann = json.load(f)
-                print(f"{phase}标注文件: 包含 {len(ann['images'])} 张图像, {len(ann['annotations'])} 个标注")
-        except Exception as e:
-            raise ValueError(f"{phase}标注文件解析失败: {str(e)}")
-
-    # 3. 图像采样检查
-    print("\n=== 正在抽样检查图像文件 ===")
-    for phase in ['train', 'val']:
-        dataset = build_dataset(getattr(cfg.data, phase))
-        print(f"{phase}数据集总样本数: {len(dataset)}")
-
-        # 检查前5个样本
-        for i in range(min(5, len(dataset))):
-            sample = dataset[i]
-            img_path = sample['filename']
-            hq_path = sample['hq_img_filename']
-
-            print(f"\n样本 {i}:")
-            print(f"LQ图像路径: {img_path} -> {'存在' if osp.exists(img_path) else '缺失'}")
-            print(f"HQ图像路径: {hq_path} -> {'存在' if osp.exists(hq_path) else '缺失'}")
-
-            if 'gt_bboxes' in sample:
-                print(f"标注框数量: {len(sample['gt_bboxes'])}")
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Train a diffusion model')
+    parser = argparse.ArgumentParser(description='Train a diffusion model using MMDetection framework')
     parser.add_argument('config', help='train config file path')
     parser.add_argument('--work-dir', help='the dir to save logs and models')
     parser.add_argument(
@@ -149,12 +97,19 @@ def parse_args():
         default='none',
         help='job launcher')
     parser.add_argument('--local_rank', type=int, default=0)
+    # 【修改4】移除 train-mode 和 test-num 参数，因为它们不再需要
+    # parser.add_argument(
+    #     '--train-mode', ... )
+    parser.add_argument(
+        '--test-num', ... )
+
+    # auto-scale-lr 参数可以保留，因为它很有用
     parser.add_argument(
         '--auto-scale-lr',
         action='store_true',
         help='enable automatically scaling LR.')
-    args = parser.parse_args()
 
+    args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
 
@@ -174,7 +129,6 @@ def main():
 
     cfg = Config.fromfile(args.config)
 
-
     # replace the ${key} with the value of cfg.key
     cfg = replace_cfg_vals(cfg)
 
@@ -184,22 +138,23 @@ def main():
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
 
-    # 确保配置文件中没有检测相关的设置
-    if 'detector' in cfg.model or 'roi_head' in cfg.model:
-        warnings.warn('Detector related configurations found in the config file. '
-                      'These will be ignored for diffusion model training.')
-
-    # 自动调整学习率
-    if args.auto_scale_lr:
-        if 'auto_scale_lr' in cfg and \
-                'enable' in cfg.auto_scale_lr and \
-                'base_batch_size' in cfg.auto_scale_lr:
-            cfg.auto_scale_lr.enable = True
+    # 【修改5】 auto-scale-lr 逻辑可以简化或直接使用
+    # mmdet 的 auto_scale_lr 是在 train.py 的顶层实现的，我们在这里手动实现一个简化版
+    if args.auto_scale_lr and 'auto_scale_lr' in cfg and cfg.auto_scale_lr.get('enable', False):
+        # get num of gpus
+        if args.launcher == 'none':
+            gpus = len(cfg.gpu_ids)
         else:
-            warnings.warn('Can not find "auto_scale_lr" or '
-                          '"auto_scale_lr.enable" or '
-                          '"auto_scale_lr.base_batch_size" in your'
-                          ' configuration file.')
+            _, world_size = get_dist_info()
+            gpus = world_size
+
+        # calculate total batch size
+        total_batch_size = cfg.data.samples_per_gpu * gpus
+        base_batch_size = cfg.auto_scale_lr.get('base_batch_size')
+        if base_batch_size:
+            factor = total_batch_size / base_batch_size
+            cfg.optimizer.lr = cfg.optimizer.lr * factor
+            print(f'LR scaled by {factor}, new LR is {cfg.optimizer.lr}')
 
     # set multi-process settings
     setup_multi_processes(cfg)
@@ -212,46 +167,52 @@ def main():
     if args.work_dir is not None:
         cfg.work_dir = args.work_dir
     elif cfg.get('work_dir', None) is None:
-        cfg.work_dir = osp.join('./work_dirs_diff',
+        cfg.work_dir = osp.join('./work_dirs',
                                 osp.splitext(osp.basename(args.config))[0])
 
     if args.resume_from is not None:
         cfg.resume_from = args.resume_from
     cfg.auto_resume = args.auto_resume
 
-    # GPU设置
+    # GPU IDs setup - this part is mostly fine
     if args.gpus is not None:
         cfg.gpu_ids = range(1)
-        warnings.warn('`--gpus` is deprecated. Use `gpus=1` now.')
+        warnings.warn('... single GPU mode ...')
     if args.gpu_ids is not None:
         cfg.gpu_ids = args.gpu_ids[0:1]
-        warnings.warn('`--gpu-ids` is deprecated, please use `--gpu-id`.')
+        warnings.warn('... use --gpu-id ...')
     if args.gpus is None and args.gpu_ids is None:
         cfg.gpu_ids = [args.gpu_id]
 
-    # init distributed env first, since logger depends on the dist info.
+    # 【修改6】移除所有 train_mode 相关的逻辑
+    # if args.train_mode == 'diff':
+    #     ...
+
+    # init distributed env first
     if args.launcher == 'none':
         distributed = False
     else:
         distributed = True
+        torch.cuda.set_device(args.local_rank)
         init_dist(args.launcher, **cfg.dist_params)
-        # re-set gpu_ids with distributed training mode
-        _, world_size = get_dist_info()
+        rank, world_size = get_dist_info()
         cfg.gpu_ids = range(world_size)
 
-    # create work_dir
+    # create work_dir and logger
     mmcv.mkdir_or_exist(osp.abspath(cfg.work_dir))
-    # dump config
     cfg.dump(osp.join(cfg.work_dir, osp.basename(args.config)))
-    # init the logger before other steps
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
     log_file = osp.join(cfg.work_dir, f'{timestamp}.log')
     logger = get_root_logger(log_file=log_file, log_level=cfg.log_level)
 
-    # init the meta dict to record some important information such as
-    # environment info and seed, which will be logged
-    meta = dict()
+    if hasattr(cfg.model, 'diff_cfg') and 'uw_loss_weight' in cfg.model.diff_cfg:
+        original_weight = cfg.model.diff_cfg['uw_loss_weight']
+        cfg.model.diff_cfg['uw_loss_weight'] = original_weight * args.test_num
+        logger.info(
+            f'Adjusted uw_loss_weight: {original_weight} * {args.test_num} = {cfg.model.diff_cfg["uw_loss_weight"]}')
+
     # log env info
+    meta = dict()
     env_info_dict = collect_env()
     env_info = '\n'.join([(f'{k}: {v}') for k, v in env_info_dict.items()])
     dash_line = '-' * 60 + '\n'
@@ -259,14 +220,13 @@ def main():
                 dash_line)
     meta['env_info'] = env_info
     meta['config'] = cfg.pretty_text
-    # log some basic info
     logger.info(f'Distributed training: {distributed}')
     logger.info(f'Config:\n{cfg.pretty_text}')
 
     cfg.device = get_device()
     # set random seeds
     seed = init_random_seed(args.seed, device=cfg.device)
-    seed = seed + dist.get_rank() if args.diff_seed else seed
+    seed = seed + dist.get_rank() if args.diff_seed and distributed else seed
     logger.info(f'Set random seed to {seed}, '
                 f'deterministic: {args.deterministic}')
     set_random_seed(seed, deterministic=args.deterministic)
@@ -274,78 +234,81 @@ def main():
     meta['seed'] = seed
     meta['exp_name'] = osp.basename(args.config)
 
-    # build model - 这里会构建你的扩散模型
+    # Build the model
     model = build_detector(
         cfg.model,
         train_cfg=cfg.get('train_cfg'),
         test_cfg=cfg.get('test_cfg'))
+    model.init_weights()
 
-    # 添加DDP兼容性初始化
-    if distributed:
-        # 确保所有rank同步随机种子
-        set_random_seed(cfg.seed + dist.get_rank())
+    # Build the dataset
+    datasets = [build_dataset(cfg.data.train)]
 
-        # 模型预处理
-        model._is_init = True
-        if hasattr(model, '_setup_trainable_params'):
-            model._setup_trainable_params()
+    # Add CLASSES to the model
+    if hasattr(datasets[0], 'CLASSES'):
+        model.CLASSES = datasets[0].CLASSES
 
-        # 分布式数据并行包装
-        model = torch.nn.parallel.DistributedDataParallel(
-            model.cuda(),
-            device_ids=[torch.cuda.current_device()],
-            output_device=torch.cuda.current_device(),
-            find_unused_parameters=True
-        )
-
-    # 修改数据加载部分
-    def build_compatible_dataset(cfg):
-        dataset = build_dataset(cfg.data.train)
-        if distributed:
-            from mmcv.parallel import collate
-            dataset = torch.utils.data.DataLoader(
-                dataset,
-                batch_size=cfg.data.samples_per_gpu,
-                sampler=torch.utils.data.distributed.DistributedSampler(dataset),
-                collate_fn=collate,
-                num_workers=cfg.data.workers_per_gpu,
-                pin_memory=True
-            )
-        return dataset
-
-    datasets = [build_compatible_dataset(cfg)]
-
-    # 修改训练配置
-    cfg.optimizer_config.grad_clip = dict(max_norm=1.0)
-    if distributed:
-        cfg.optimizer_config.update(dict(
-            _delete_=True,
-            type='DistOptimizerHook',
-            update_interval=1,
-            grad_clip=dict(max_norm=1.0)
-        ))
-
-    # 验证集设置
     if len(cfg.workflow) == 2:
         val_dataset = copy.deepcopy(cfg.data.val)
         val_dataset.pipeline = cfg.data.train.pipeline
         datasets.append(build_dataset(val_dataset))
 
-    # checkpoint配置
     if cfg.checkpoint_config is not None:
         cfg.checkpoint_config.meta = dict(
             mmdet_version=__version__ + get_git_hash()[:7],
-            CLASSES=datasets[0].CLASSES)
+            CLASSES=datasets[0].CLASSES if hasattr(datasets[0], 'CLASSES') else None)
 
-    # 训练扩散模型
-    train_detector(
-        model,
-        datasets,
-        cfg,
-        distributed=distributed,
-        validate=(not args.no_validate),
-        timestamp=timestamp,
-        meta=meta)
+    # 【修改8】使用更通用的 MMCV 训练流程，而不是 mmdet.apis.train_detector
+    # DDP wrapping
+    if distributed:
+        device = torch.device('cuda', args.local_rank)
+        model = model.to(device)
+        # find_unused_parameters 仍然是好主意，因为扩散模型可能有些复杂
+        model = torch.nn.parallel.DistributedDataParallel(
+            model,
+            device_ids=[args.local_rank],
+            output_device=args.local_rank,
+            find_unused_parameters=True
+        )
+
+    # Build the runner
+    optimizer = build_optimizer(model, cfg.optimizer)
+
+    if 'runner' not in cfg:
+        cfg.runner = {
+            'type': 'EpochBasedRunner',
+            'max_epochs': cfg.total_epochs
+        }
+        warnings.warn(
+            'config is now expected to have a `runner` section, '
+            'please set `runner` in your config.', UserWarning)
+    else:
+        if 'total_epochs' in cfg:
+            assert cfg.total_epochs == cfg.runner.max_epochs
+
+    runner = build_runner(
+        cfg.runner,
+        default_args=dict(
+            model=model,
+            optimizer=optimizer,
+            work_dir=cfg.work_dir,
+            logger=logger,
+            meta=meta))
+
+    runner.register_training_hooks(
+        cfg.lr_config,
+        cfg.optimizer_config,
+        cfg.checkpoint_config,
+        cfg.log_config,
+        cfg.get('momentum_config', None),
+        custom_hooks_config=cfg.get('custom_hooks', None))
+
+    if args.resume_from:
+        runner.resume(args.resume_from)
+    elif cfg.get('auto_resume'):
+        runner.resume(osp.join(cfg.work_dir, 'latest.pth'))
+
+    runner.run(datasets, cfg.workflow, max_epochs=cfg.runner.max_epochs)
 
 
 if __name__ == '__main__':
