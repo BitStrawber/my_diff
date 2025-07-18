@@ -129,65 +129,52 @@ class EnDiff(BaseModule):
         uw_loss = F.mse_loss(noise_pred, noise_gt, reduction='mean') * self.uw_loss_weight
         return dict(land_loss=land_loss, uw_loss=uw_loss)
 
-    def forward_train(self, u0: torch.Tensor, h0: torch.Tensor):
-        # 保证随机数生成的一致性
-        if dist.is_available() and dist.is_initialized():
-            # 在 rank 0 上生成随机数
-            if dist.get_rank() == 0:
-                train_idx = torch.randint(1, len(self.t_list), (1,), device=u0.device)
+    def train_step(self, u0: torch.Tensor, h0: torch.Tensor):
+        """
+        专门用于训练的函数，计算 loss。
+        这个逻辑之前在 forward_train 中。
+        """
+        train_idx = random.randint(1, len(self.t_list) - 1)
+        # 如果是 DDP，需要同步 train_idx
+        if torch.distributed.is_available() and torch.distributed.is_initialized():
+            if torch.distributed.get_rank() == 0:
+                tensor_idx = torch.tensor(train_idx, device=u0.device)
             else:
-                train_idx = torch.zeros((1,), dtype=torch.long, device=u0.device)
+                tensor_idx = torch.zeros(1, dtype=torch.long, device=u0.device)
+            torch.distributed.broadcast(tensor_idx, src=0)
+            train_idx = tensor_idx.item()
 
-            # 将 rank 0 的随机数广播给所有进程
-            dist.broadcast(train_idx, src=0)
-
-            # 从 tensor 中获取整数值
-            train_idx = train_idx.item()
-        else:
-            # 非分布式模式下，保持原样
-            train_idx = random.randint(1, len(self.t_list) - 1)
-
-        rs, noise_gt = self.q_diffuse(u0, torch.full((1,), self.t_end, device=u0.device))  # 低质量图像加噪结果，加噪到底
-
+        rs, noise_gt = self.q_diffuse(u0, torch.full((1,), self.t_end, device=u0.device))
         rt_prev = rs
-        noise_pred = noise_gt  # 初始化以防循环不执行
+        noise_pred = noise_gt  # 初始化
 
-        # 现在所有进程的 train_idx 和循环次数都相同了
-        if train_idx < len(self.t_list):  # 增加一个边界检查
+        if train_idx < len(self.t_list):
             for i, t in enumerate(self.t_list[:train_idx - 1:-1]):
                 _, rt_prev, noise_pred = self.predict(rt_prev, u0, torch.full((1,), t, device=u0.device))
 
-        # ht_prev, _ = self.q_diffuse(h0, torch.full((1,), self.t_list[train_idx - 1], device=u0.device))
+        return self.loss(rt_prev, h0, noise_pred, noise_gt)
 
-        return self.loss(rt_prev, ho, noise_pred, noise_gt)
-
-    # 输入第质量与高质量图像，向loss中输入（预测去噪结果，真实目标数据，预测噪声，真实噪声）：
-
-    def forward_test(self, u0):
-
-        # save_path = '/home/xcx/桌面/temp0'
+    def inference_step(self, u0: torch.Tensor):
+        """
+        专门用于推理的函数，生成增强图像。
+        这个逻辑之前在 forward_test 中。
+        """
         rs, _ = self.q_diffuse(u0, torch.full((1,), self.t_end, device=u0.device))
-
         rt_prev = rs
-        for i, t in enumerate(self.t_list[:1:-1]):
-            r0, rt_prev, _ = self.predict(rt_prev, u0, torch.full((1,), t, device=u0.device))
+        r0 = u0  # 初始化
 
-        # temp = r0
-        # # 将 r0 转换为 [0, 1] 范围
-        # temp = (temp - temp.min()) / (temp.max() - temp.min())
-        # # 生成文件名
-        # filename = f'output_image_{self.counter:04d}.png'  # 按序号生成文件名
-        # self.counter += 1  # 递增计数器
-        # # 保存图像
-        # save_path_full = os.path.join(save_path, filename)
-        # vutils.save_image(temp, save_path_full, normalize=True)
+        for i, t in enumerate(self.t_list[:0:-1]):  # 修正循环，不包括 t=0
+            r0, rt_prev, _ = self.predict(rt_prev, u0, torch.full((1,), t, device=u0.device))
 
         return r0
 
-    def forward(self, u0: torch.Tensor, h0: torch.Tensor = None, return_loss: bool = True):
+    def forward(self, u0: torch.Tensor, h0: torch.Tensor = None, return_loss: bool = True, **kwargs):
+        """
+        统一的 forward 入口，由包装器调用。
+        """
         if return_loss:
-            assert h0 is not None
-            return self.forward_train(u0, h0)
+            assert h0 is not None, "High-quality image (h0) is required for training."
+            return self.train_step(u0, h0)
         else:
-            return self.forward_test(u0)
+            return self.inference_step(u0)
 
