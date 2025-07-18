@@ -74,20 +74,21 @@ class EnDiff(BaseModule):
         # 初始化计数器
         self.counter = 0
 
-        s = [15, 60, 90]
-        self.guas_15 = MyGaussianBlur(radius=s[0], sigema=s[0]).cuda()
-        self.guas_60 = MyGaussianBlur(radius=s[1], sigema=s[1]).cuda()
-        self.guas_90 = MyGaussianBlur(radius=s[2], sigema=s[2]).cuda()
-
-        self.temp_15 = self.guas_15.template()
-        self.temp_60 = self.guas_60.template()
-        self.temp_90 = self.guas_90.template()
-
     # 光场滤波器，获得光场信息并返回
     def MutiScaleLuminanceEstimation(self, img):
-        x_15 = self.guas_15.filter(img, self.temp_15)
-        x_60 = self.guas_60.filter(img, self.temp_60)
-        x_90 = self.guas_90.filter(img, self.temp_90)
+        guas_15 = MyGaussianBlur(radius=15, sigema=15).cuda()
+        temp_15 = guas_15.template()
+
+        guas_60 = MyGaussianBlur(radius=60, sigema=60).cuda()
+        temp_60 = guas_60.template()
+
+        guas_90 = MyGaussianBlur(radius=90, sigema=90).cuda()
+        temp_90 = guas_90.template()
+
+        x_15 = guas_15.filter(img, temp_15)
+        x_60 = guas_60.filter(img, temp_60)
+        x_90 = guas_90.filter(img, temp_90)
+
         img = (x_15 + x_60 + x_90) / 3
         return img
 
