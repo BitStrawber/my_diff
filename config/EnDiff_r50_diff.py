@@ -134,7 +134,7 @@ classes = [
     'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
 ]
 
-gpu_num = 3
+gpu_num = 4
 gpu_ids = range(gpu_num)
 
 data = dict(
