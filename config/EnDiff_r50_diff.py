@@ -134,9 +134,6 @@ classes = [
     'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
 ]
 
-gpu_num = 4
-gpu_ids = range(gpu_num)
-
 data = dict(
     samples_per_gpu=1,
     workers_per_gpu=4,
@@ -167,7 +164,7 @@ data = dict(
 evaluation = dict(interval=1, save_best='auto', classwise=True)
 
 optimizer = dict(
-    lr=0.0025*gpu_num,
+    lr=0.0025,
     paramwise_cfg=dict(
         custom_keys=dict(diffusion=dict(lr_mult=0.1, decay_mult=5.0))))
 
