@@ -133,6 +133,10 @@ classes = [
     'brain coral', 'eel', 'hammerhead', 'mud turtle', 'sea urchin', 'terrapin',
     'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
 ]
+
+gpu_num = 3
+gpu_ids = range(gpu_num)
+
 data = dict(
     samples_per_gpu=1,
     workers_per_gpu=4,
@@ -163,7 +167,7 @@ data = dict(
 evaluation = dict(interval=1, save_best='auto', classwise=True)
 
 optimizer = dict(
-    lr=0.0025,
+    lr=0.0025*gpu_num,
     paramwise_cfg=dict(
         custom_keys=dict(diffusion=dict(lr_mult=0.1, decay_mult=5.0))))
 
