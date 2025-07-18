@@ -12,7 +12,7 @@ class DiffusionOnlyWrapper(BaseDetector):
     它继承自 BaseDetector 以便能被 MMDetection 的 runner 识别和训练。
     """
 
-    def __init__(self, diff_cfg, init_cfg=None):
+    def __init__(self, diff_cfg, init_cfg=None, train_cfg=None, test_cfg=None, **kwargs):
         super().__init__(init_cfg)
         # 唯一的组件就是我们的扩散模型
         self.diffusion = MODELS.build(diff_cfg)
@@ -24,6 +24,8 @@ class DiffusionOnlyWrapper(BaseDetector):
         self.rpn_head = None
         self.roi_head = None
         self.bbox_head = None
+        self.train_cfg = train_cfg
+        self.test_cfg = test_cfg
 
     def extract_feat(self, img):
         # 这个方法必须实现，但我们在这里什么都不做，因为特征提取在 diffusion 模型内部
