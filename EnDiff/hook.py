@@ -1,6 +1,7 @@
 from mmcv import runner
 from mmcv.runner.hooks import HOOKS,Hook, LrUpdaterHook
 from typing import List
+import torch
 
 @HOOKS.register_module()
 class TrainModeControlHook(Hook):
@@ -19,7 +20,10 @@ class TrainModeControlHook(Hook):
             self.swich_epoch.append(e + self.swich_epoch[i - 1] if i > 0 else e)
 
     def before_run(self, runner):
-        self.model = runner.model.module
+        if isinstance(runner.model, (torch.nn.parallel.DistributedDataParallel, torch.nn.parallel.DataParallel)):
+            self.model = runner.model.module
+        else:
+            self.model = runner.model
 
     def before_train_epoch(self, runner):
         epoch = runner.epoch + 1
