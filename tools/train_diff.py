@@ -165,19 +165,6 @@ def main():
     if args.resume_from is not None:
         cfg.resume_from = args.resume_from
     cfg.auto_resume = args.auto_resume
-    if args.gpus is not None:
-        cfg.gpu_ids = range(1)
-        warnings.warn('`--gpus` is deprecated because we only support '
-                      'single GPU mode in non-distributed training. '
-                      'Use `gpus=1` now.')
-    if args.gpu_ids is not None:
-        cfg.gpu_ids = args.gpu_ids[0:1]
-        warnings.warn('`--gpu-ids` is deprecated, please use `--gpu-id`. '
-                      'Because we only support single GPU mode in '
-                      'non-distributed training. Use the first GPU '
-                      'in `gpu_ids` now.')
-    if args.gpus is None and args.gpu_ids is None:
-        cfg.gpu_ids = [args.gpu_id]
 
     if args.train_mode == 'diff':
         cfg.custom_hooks[1]['train_modes'] = ['sample']
@@ -232,10 +219,11 @@ def main():
 
     cfg.device = get_device()
     # set random seeds
+    cfg.device = get_device()
     seed = init_random_seed(args.seed, device=cfg.device)
-    seed = seed + dist.get_rank() if args.diff_seed else seed
-    logger.info(f'Set random seed to {seed}, '
-                f'deterministic: {args.deterministic}')
+    if distributed:
+        seed = seed + get_rank() if args.diff_seed else seed
+    logger.info(f'Set random seed to {seed}, deterministic: {args.deterministic}')
     set_random_seed(seed, deterministic=args.deterministic)
     cfg.seed = seed
     meta['seed'] = seed
@@ -247,30 +235,13 @@ def main():
         test_cfg=cfg.get('test_cfg'))
     model.init_weights()
 
-    # 修改3: 改进的DDP包装逻辑
-    if distributed:
-        # 确保所有进程完成模型构建
-        dist.barrier()
-
-        # 使用local_rank而不是gpu_id
-        device = torch.device('cuda', args.local_rank)
-        model = model.to(device)
-
-        # 修改4: 更健壮的DDP配置
-        model = torch.nn.parallel.DistributedDataParallel(
-            model,
-            device_ids=[args.local_rank],
-            output_device=args.local_rank,
-            broadcast_buffers=False,
-            find_unused_parameters=True,
-            # 添加gradient_as_bucket_view可以改善某些情况下的性能
-            gradient_as_bucket_view=True
-        )
-
-        # 确保所有进程完成DDP包装
-        dist.barrier()
-    elif cfg.device == 'cuda':
-        model = model.cuda()
+    # 【核心修改】移除手动DDP封装！train_detector会处理
+    # MMDetection的train_detector会检查distributed标志，并使用MMDistributedDataParallel自动封装模型。
+    # MMDistributedDataParallel 默认就会处理 find_unused_parameters 的问题。
+    # 你只需要在配置文件中确保DDP的配置是正确的。
+    # 例如，在config文件中加入 find_unused_parameters=True
+    # cfg.find_unused_parameters = True
+    # 或者直接在命令行传入 --cfg-options find_unused_parameters=True
 
     datasets = [build_dataset(cfg.data.train)]
     if len(cfg.workflow) == 2:

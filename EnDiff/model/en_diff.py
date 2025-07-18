@@ -129,52 +129,53 @@ class EnDiff(BaseModule):
         uw_loss = F.mse_loss(noise_pred, noise_gt, reduction='mean') * self.uw_loss_weight
         return dict(land_loss=land_loss, uw_loss=uw_loss)
 
-    def train_step(self, u0: torch.Tensor, h0: torch.Tensor):
-        """
-        专门用于训练的函数，计算 loss。
-        这个逻辑之前在 forward_train 中。
-        """
-        train_idx = random.randint(1, len(self.t_list) - 1)
-        # 如果是 DDP，需要同步 train_idx
-        if torch.distributed.is_available() and torch.distributed.is_initialized():
-            if torch.distributed.get_rank() == 0:
-                tensor_idx = torch.tensor(train_idx, device=u0.device)
-            else:
-                tensor_idx = torch.zeros(1, dtype=torch.long, device=u0.device)
-            torch.distributed.broadcast(tensor_idx, src=0)
-            train_idx = tensor_idx.item()
+    def get_x0_from_noise(self, xt, t, noise):
+        """根据 xt, t 和预测的噪声，反解出 x0"""
+        alpha_cumprod = self.get_alpha_cumprod(t).to(xt.device)
+        x0_pred = (xt - torch.sqrt(1 - alpha_cumprod) * noise) / torch.sqrt(alpha_cumprod)
+        return x0_pred
 
-        rs, noise_gt = self.q_diffuse(u0, torch.full((1,), self.t_end, device=u0.device))
-        rt_prev = rs
-        noise_pred = noise_gt  # 初始化
+    def forward_train(self, u0: torch.Tensor, h0: torch.Tensor):
+        # 1. 为当前 batch 中的每个样本随机采样一个时间步 t
+        t = torch.randint(1, self.t_end + 1, (u0.shape[0],), device=u0.device).long()
 
-        if train_idx < len(self.t_list):
-            for i, t in enumerate(self.t_list[:train_idx - 1:-1]):
-                _, rt_prev, noise_pred = self.predict(rt_prev, u0, torch.full((1,), t, device=u0.device))
+        # 2. 对低质量图像 u0 进行一步加噪，得到加噪图 ut 和真实噪声 noise_gt
+        ut, noise_gt = self.q_diffuse(u0, t)
 
-        return self.loss(rt_prev, h0, noise_pred, noise_gt)
+        # 3. 让网络从 (ut, t) 预测噪声，以 u0 作为条件
+        noise_pred = self.net(ut, t, u0)
 
-    def inference_step(self, u0: torch.Tensor):
-        """
-        专门用于推理的函数，生成增强图像。
-        这个逻辑之前在 forward_test 中。
-        """
+        # 4. (可选但推荐) 从预测的噪声反解出预测的 x0
+        x0_pred = self.get_x0_from_noise(ut, t, noise_pred)
+        # 也许需要对 x0_pred 进行 clamp，以匹配图像的范围，例如 [-1, 1] 或 [0, 1]
+        # x0_pred.clamp_(-1., 1.)
+
+        # 5. 将所有需要的张量传递给独立的 loss 函数
+        return self.loss(x0_pred, h0, noise_pred, noise_gt)
+
+    # 输入第质量与高质量图像，向loss中输入（预测去噪结果，真实目标数据，预测噪声，真实噪声）：
+
+    def forward_test(self, u0):
+
+        # save_path = '/home/xcx/桌面/temp0'
         rs, _ = self.q_diffuse(u0, torch.full((1,), self.t_end, device=u0.device))
+
         rt_prev = rs
-        r0 = u0  # 初始化
+        # 迭代采样生成最终图像
+        # 注意 t_list 应该从 t_end 遍历到 1
+        for t_val in reversed(self.t_list):
+            if t_val == 0: continue
+            t = torch.full((u0.shape[0],), t_val, device=u0.device)
+            r0, rt_prev, _ = self.predict(rt_prev, u0, t)
 
-        for i, t in enumerate(self.t_list[:0:-1]):  # 修正循环，不包括 t=0
-            r0, rt_prev, _ = self.predict(rt_prev, u0, torch.full((1,), t, device=u0.device))
+        final_r0, _, _ = self.predict(rt_prev, u0, torch.full((u0.shape[0],), self.t_list[0], device=u0.device))
 
-        return r0
+        return final_r0
 
-    def forward(self, u0: torch.Tensor, h0: torch.Tensor = None, return_loss: bool = True, **kwargs):
-        """
-        统一的 forward 入口，由包装器调用。
-        """
+    def forward(self, u0: torch.Tensor, h0: torch.Tensor = None, return_loss: bool = True):
         if return_loss:
-            assert h0 is not None, "High-quality image (h0) is required for training."
-            return self.train_step(u0, h0)
+            assert h0 is not None
+            return self.forward_train(u0, h0)
         else:
-            return self.inference_step(u0)
+            return self.forward_test(u0)
 
