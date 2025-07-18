@@ -1,20 +1,87 @@
 _base_ = [
+    './_base_/models/cascade_rcnn_r50_fpn.py',
     './_base_/schedules/schedule_2x.py', './_base_/default_runtime.py'
 ]
 
 # model
 num_classes = 30
 model = dict(
-    type='DiffusionOnlyWrapper', # 使用我们新的轻量级包装器
+    type='EnDiffDet',
+    init_cfg=dict(
+        type='Pretrained',
+        checkpoint='torchvision://resnet50'
+    ),
     diff_cfg=dict(
-        type='EnDiff',
+        type='EnDiff0',
         net=dict(type='PM', channels=16, time_channels=16),
         diffuse_ratio=0.6,
         sample_times=15,
         land_loss_weight=1,
-        uw_loss_weight=1
-    )
-    # 不再有 backbone, roi_head 等配置
+        uw_loss_weight=1),
+    backbone=dict(frozen_stages=-1, init_cfg=None),
+    roi_head=dict(
+        bbox_head=[
+            dict(
+                type='Shared2FCBBoxHead',
+                in_channels=256,
+                fc_out_channels=1024,
+                roi_feat_size=7,
+                num_classes=num_classes,
+                bbox_coder=dict(
+                    type='DeltaXYWHBBoxCoder',
+                    target_means=[0., 0., 0., 0.],
+                    target_stds=[0.1, 0.1, 0.2, 0.2]),
+                reg_class_agnostic=True,
+                loss_cls=dict(
+                    type='CrossEntropyLoss',
+                    use_sigmoid=False,
+                    loss_weight=1.0),
+                loss_bbox=dict(type='SmoothL1Loss', beta=1.0,
+                               loss_weight=1.0)),
+            dict(
+                type='Shared2FCBBoxHead',
+                in_channels=256,
+                fc_out_channels=1024,
+                roi_feat_size=7,
+                num_classes=num_classes,
+                bbox_coder=dict(
+                    type='DeltaXYWHBBoxCoder',
+                    target_means=[0., 0., 0., 0.],
+                    target_stds=[0.05, 0.05, 0.1, 0.1]),
+                reg_class_agnostic=True,
+                loss_cls=dict(
+                    type='CrossEntropyLoss',
+                    use_sigmoid=False,
+                    loss_weight=1.0),
+                loss_bbox=dict(type='SmoothL1Loss', beta=1.0,
+                               loss_weight=1.0)),
+            dict(
+                type='Shared2FCBBoxHead',
+                in_channels=256,
+                fc_out_channels=1024,
+                roi_feat_size=7,
+                num_classes=num_classes,
+                bbox_coder=dict(
+                    type='DeltaXYWHBBoxCoder',
+                    target_means=[0., 0., 0., 0.],
+                    target_stds=[0.033, 0.033, 0.067, 0.067]),
+                reg_class_agnostic=True,
+                loss_cls=dict(
+                    type='CrossEntropyLoss',
+                    use_sigmoid=False,
+                    loss_weight=1.0),
+                loss_bbox=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1.0))
+        ]),
+    test_cfg=dict(
+        rpn=dict(
+            nms_pre=1000,
+            max_per_img=1000,
+            nms=dict(type='nms', iou_threshold=0.7),
+            min_bbox_size=0),
+        rcnn=dict(
+            score_thr=0.001,
+            nms=dict(type='soft_nms', iou_threshold=0.5),
+            max_per_img=100))
 )
 
 img_norm_cfg = dict(
@@ -68,8 +135,8 @@ classes = [
 ]
 
 data = dict(
-    samples_per_gpu=1,
-    workers_per_gpu=4,
+    samples_per_gpu=2,
+    workers_per_gpu=8,
     train=dict(
         type=dataset_type,
         hq_img_prefix=hq_img_prefix,
@@ -100,7 +167,6 @@ optimizer = dict(
     lr=0.0025,
     paramwise_cfg=dict(
         custom_keys=dict(diffusion=dict(lr_mult=0.1, decay_mult=5.0))))
-optimizer_config = dict(grad_clip=None)
 
 epoch_iter = 2262
 lr_config = dict(
@@ -114,7 +180,7 @@ lr_config = dict(
     warmup_ratio=0.001,
     warmup_start=0)
 
-auto_scale_lr = dict(enable=True, base_batch_size=1)
+auto_scale_lr = dict(enable=True, base_batch_size=2)
 
 runner = dict(max_epochs=24)
 log_config = dict(
@@ -122,13 +188,15 @@ log_config = dict(
     hooks=[dict(type='TextLoggerHook')])
 custom_hooks = [
     dict(type='NumClassCheckHook'),
+    dict(
+        type='TrainModeControlHook', train_modes=['sample', 'det'], num_epoch=[6, 6])
 ]
 fp16 = dict(loss_scale=512.0)
 
+find_unused_parameters = True
 # ====== 配置区域 ======
 # CONFIG_PATH = './config/EnDiff_r50_diff.py'
 # CHECKPOINT_PATH = './work_dirs/EnDiff_r50_diff/epoch_9.pth'
 # INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
 # OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
-# ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'
 # ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'
