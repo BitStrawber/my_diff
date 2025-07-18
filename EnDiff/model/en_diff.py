@@ -130,16 +130,36 @@ class EnDiff(BaseModule):
         return dict(land_loss=land_loss, uw_loss=uw_loss)
 
     def forward_train(self, u0: torch.Tensor, h0: torch.Tensor):
-        train_idx = random.randint(1, len(self.t_list) - 1)
+        # 保证随机数生成的一致性
+        if dist.is_available() and dist.is_initialized():
+            # 在 rank 0 上生成随机数
+            if dist.get_rank() == 0:
+                train_idx = torch.randint(1, len(self.t_list), (1,), device=u0.device)
+            else:
+                train_idx = torch.zeros((1,), dtype=torch.long, device=u0.device)
+
+            # 将 rank 0 的随机数广播给所有进程
+            dist.broadcast(train_idx, src=0)
+
+            # 从 tensor 中获取整数值
+            train_idx = train_idx.item()
+        else:
+            # 非分布式模式下，保持原样
+            train_idx = random.randint(1, len(self.t_list) - 1)
+
         rs, noise_gt = self.q_diffuse(u0, torch.full((1,), self.t_end, device=u0.device))  # 低质量图像加噪结果，加噪到底
 
         rt_prev = rs
-        for i, t in enumerate(self.t_list[:train_idx - 1:-1]):
-            _, rt_prev, noise_pred = self.predict(rt_prev, u0, torch.full((1,), t, device=u0.device))
+        noise_pred = noise_gt  # 初始化以防循环不执行
 
-        ht_prev, _ = self.q_diffuse(h0, torch.full((1,), self.t_list[train_idx - 1], device=u0.device))  # 高质量图像加噪结果
+        # 现在所有进程的 train_idx 和循环次数都相同了
+        if train_idx < len(self.t_list):  # 增加一个边界检查
+            for i, t in enumerate(self.t_list[:train_idx - 1:-1]):
+                _, rt_prev, noise_pred = self.predict(rt_prev, u0, torch.full((1,), t, device=u0.device))
 
-        return self.loss(rt_prev, ht_prev, noise_pred, noise_gt)
+        # ht_prev, _ = self.q_diffuse(h0, torch.full((1,), self.t_list[train_idx - 1], device=u0.device))
+
+        return self.loss(rt_prev, ho, noise_pred, noise_gt)
 
     # 输入第质量与高质量图像，向loss中输入（预测去噪结果，真实目标数据，预测噪声，真实噪声）：
 
