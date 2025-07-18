@@ -135,8 +135,8 @@ classes = [
 ]
 
 data = dict(
-    samples_per_gpu=2,
-    workers_per_gpu=8,
+    samples_per_gpu=1,
+    workers_per_gpu=4,
     train=dict(
         type=dataset_type,
         hq_img_prefix=hq_img_prefix,
