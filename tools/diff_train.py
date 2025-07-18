@@ -25,12 +25,9 @@ from mmdet.utils import (collect_env, get_device, get_root_logger,
 # 【修改2】导入 mmcv 的 EpochBasedRunner 和 build_optimizer
 from mmcv.runner import (EpochBasedRunner, build_optimizer,
                          build_runner)
-
-
-# 【修改3】移除不必要的导入
-# import sys
-# sys.path.append('./')
-# from EnDiff import *
+import sys
+sys.path.append('./')
+from EnDiff import *
 
 
 def parse_args():
@@ -101,7 +98,10 @@ def parse_args():
     # parser.add_argument(
     #     '--train-mode', ... )
     parser.add_argument(
-        '--test-num', ... )
+        '--test-num',
+        type=float,
+        default=1.0,
+        help='multiplicative factor for uw_loss_weight in config')
 
     # auto-scale-lr 参数可以保留，因为它很有用
     parser.add_argument(
