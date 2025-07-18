@@ -149,10 +149,10 @@ class EnDiff(BaseModule):
         # 也许需要对 x0_pred 进行 clamp，以匹配图像的范围，例如 [-1, 1] 或 [0, 1]
         # x0_pred.clamp_(-1., 1.)
 
-        ht, _ = self.q_diffuse(h0, t, noise=None)
+        # ht, _ = self.q_diffuse(h0, t, noise=None)
 
         # 5. 将所有需要的张量传递给独立的 loss 函数
-        return self.loss(x0_pred, ht, noise_pred, noise_gt)
+        return self.loss(x0_pred, h0, noise_pred, noise_gt)
 
     # 输入第质量与高质量图像，向loss中输入（预测去噪结果，真实目标数据，预测噪声，真实噪声）：
 
