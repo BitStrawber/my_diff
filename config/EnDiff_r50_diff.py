@@ -134,11 +134,9 @@ classes = [
     'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
 ]
 
-gpu_num = 4
-gpu_ids = range(gpu_num)
 
 data = dict(
-    samples_per_gpu=1,
+    samples_per_gpu=2,
     workers_per_gpu=4,
     train=dict(
         type=dataset_type,
@@ -183,7 +181,7 @@ lr_config = dict(
     warmup_ratio=0.001,
     warmup_start=0)
 
-auto_scale_lr = dict(enable=True, base_batch_size=1)
+auto_scale_lr = dict(enable=True, base_batch_size=2)
 
 runner = dict(max_epochs=24)
 log_config = dict(
