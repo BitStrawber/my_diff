@@ -180,7 +180,7 @@ lr_config = dict(
     warmup_ratio=0.001,
     warmup_start=0)
 
-auto_scale_lr = dict(enable=True, base_batch_size=1)
+auto_scale_lr = dict(enable=True, base_batch_size=2)
 
 runner = dict(max_epochs=24)
 log_config = dict(

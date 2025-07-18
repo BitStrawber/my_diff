@@ -10,52 +10,12 @@ import numpy as np
 from mmcv.runner import BaseModule
 from mmdet.models.builder import MODELS
 
-test = 0.1
+test = 1.0
 
 
 # =============================================================================
 # === NEW LOSS FUNCTION: Sliced-Wasserstein Distance (Computationally Feasible) ===
 # =============================================================================
-def sliced_wasserstein_distance(x, y, n_projections=64, p=2):
-    """
-    Computes the Sliced-Wasserstein Distance between two feature maps.
-    Args:
-        x, y: Input feature maps of shape (B, C, H, W).
-        n_projections: The number of random projections to use.
-        p: The norm to use for the 1D Wasserstein distance (1 or 2).
-    """
-    B, C, H, W = x.shape
-    device = x.device
-
-    # Flatten the spatial dimensions
-    x_flat = x.view(B, C, -1)  # (B, C, N)
-    y_flat = y.view(B, C, -1)  # (B, C, N)
-
-    # Generate random projection vectors
-    projections = torch.randn(C, n_projections, device=device).T  # (n_projections, C)
-    projections = F.normalize(projections, p=2, dim=1)  # Normalize projections
-
-    # Project the features
-    # (B, C, N) -> (B, N, C) @ (C, n_projections) -> (B, N, n_projections)
-    x_proj = x_flat.permute(0, 2, 1).matmul(projections.T)
-    y_proj = y_flat.permute(0, 2, 1).matmul(projections.T)
-
-    # Sort the projections to compute the 1D Wasserstein distance
-    x_proj_sorted, _ = torch.sort(x_proj, dim=1)
-    y_proj_sorted, _ = torch.sort(y_proj, dim=1)
-
-    # Calculate the L_p distance between sorted projections
-    # This is the 1D Wasserstein distance
-    dist = torch.abs(x_proj_sorted - y_proj_sorted)
-    if p == 1:
-        w_dist = torch.mean(dist, dim=1)
-    elif p == 2:
-        w_dist = torch.sqrt(torch.mean(dist ** 2, dim=1))
-    else:
-        raise ValueError("p must be 1 or 2")
-
-    # Average over all projections and the batch
-    return w_dist.mean()
 
 
 class MyGaussianBlur(torch.nn.Module):
@@ -159,8 +119,12 @@ class EnDiff0(BaseModule):
         r_prev_lf = self.MutiScaleLuminanceEstimation(r_prev)
         h_prev_lf = self.MutiScaleLuminanceEstimation(h_prev)
 
-        # Calculate land_loss using the new, efficient Sliced-Wasserstein Distance
-        land_loss = sliced_wasserstein_distance(r_prev_lf, h_prev_lf) * self.land_loss_weight
+        r = torch.flatten(r_prev_lf, 1)
+        h = torch.flatten(h_prev_lf, 1)
+        r = F.log_softmax(r, dim=-1)
+        h = F.log_softmax(h, dim=-1)
+        # 计算光场特征的 L1 损失
+        land_loss = F.kl_div(r, h, log_target=True, reduction='batchmean') * self.land_loss_weight
 
         uw_loss = F.mse_loss(noise_pred, noise_gt, reduction='mean') * self.uw_loss_weight
 
