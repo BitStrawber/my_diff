@@ -54,7 +54,7 @@ class InferenceDataset(Dataset):
 
     def __init__(self, file_paths: List[str], pipeline: List[Dict]):
         self.file_paths = file_paths
-        self.pipeline = Compose(pipeline)
+        self.pipeline = pipeline
 
     def __len__(self):
         return len(self.file_paths)

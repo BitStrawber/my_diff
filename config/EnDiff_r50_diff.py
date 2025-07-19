@@ -182,7 +182,7 @@ lr_config = dict(
 
 auto_scale_lr = dict(enable=True, base_batch_size=2)
 
-runner = dict(max_epochs=48)
+runner = dict(max_epochs=300)
 log_config = dict(
     interval=50,
     hooks=[dict(type='TextLoggerHook')])
