@@ -211,7 +211,7 @@ def parse_args():
     parser.add_argument('--config', default=DEFAULT_CONFIG_PATH, help='模型配置文件路径')
     parser.add_argument('--checkpoint', default=DEFAULT_CHECKPOINT_PATH, help='模型权重文件路径')
     parser.add_argument('--input', default=DEFAULT_INPUT_DIR, help='输入图像目录路径')
-    parser.add_argument('--output', default=DEFAULT_DIR, help='输出目录路径')
+    parser.add_argument('--output', default=DEFAULT_OUTPUT_DIR, help='输出目录路径')
     parser.add_argument('--annotation', default=DEFAULT_ANNOTATION_PATH, help='COCO标注文件路径')
     return parser.parse_args()
 
