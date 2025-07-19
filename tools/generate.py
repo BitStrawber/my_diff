@@ -66,16 +66,15 @@ def resize_to_annotation_size(img: np.ndarray, target_size: Tuple[int, int]) -> 
 def process_images_loop(model, input_dir: str, output_dir: str, config_path: str,
                         annotation_path: Optional[str], rank: int, world_size: int, device: torch.device):
     """
-    保留您原有的单图循环处理逻辑，并修正其分布式实现。
+    在新分布式代码中，应用您旧代码中有效的“预加载”技巧。
     """
-    # 1. 设置和同步
+    # ... 函数前面的设置代码（创建目录、加载COCO等）保持不变 ...
     if rank == 0:
         os.makedirs(os.path.join(output_dir, 'images'), exist_ok=True)
         os.makedirs(os.path.join(output_dir, 'visible'), exist_ok=True)
     if dist.is_initialized():
         dist.barrier()
 
-    # 2. [修正] 每个进程都需要自己的 COCO 处理器来进行后处理
     coco_processor = None
     if annotation_path and os.path.exists(annotation_path):
         try:
@@ -86,14 +85,11 @@ def process_images_loop(model, input_dir: str, output_dir: str, config_path: str
             if rank == 0:
                 print(f"Warning: Failed to load COCO annotations - {str(e)}")
 
-    # 3. 获取模型配置和完整的 Pipeline
     cfg = mmcv.Config.fromfile(config_path)
-    # [修正] 确保自定义的 Transform 被注册
     if 'custom_imports' in cfg:
         mmcv.utils.import_modules_from_strings(**cfg.custom_imports)
     test_pipeline = build_test_pipeline_from_old_code(cfg)
 
-    # 4. 分布式数据切分
     all_files = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
     if not all_files:
         if rank == 0:
@@ -101,39 +97,43 @@ def process_images_loop(model, input_dir: str, output_dir: str, config_path: str
         return
     local_files = [f for i, f in enumerate(all_files) if i % world_size == rank]
 
-    # 5. [修正] 进度条只在 rank 0 显示，并显示总进度
-    if rank == 0:
-        progress_bar = tqdm(total=len(all_files), desc="Processing Images")
+    progress_bar = tqdm(total=len(local_files), desc=f"Rank {rank} Processing", position=rank, disable=(rank != 0))
 
-    # 6. 核心处理循环 (与您的旧代码逻辑保持一致)
     for filename in local_files:
         try:
-            # === 以下是您旧代码的核心逻辑，几乎原封不动 ===
+            # ==================== 关键修改处 ====================
+            # 1. 在 Pipeline 外部，手动加载图像
             img_path = os.path.join(input_dir, filename)
+            img = mmcv.imread(img_path)
+            if img is None:
+                if rank == 0:
+                    print(f"Warning: Skipping corrupted or unreadable image: {img_path}", file=sys.stderr)
+                continue  # 跳过这张坏掉的图片
 
-            # 准备送入 pipeline 的数据字典
+            # 2. 将已经加载的图像（一个Numpy数组）直接放入 data 字典
+            # 这与您能运行的旧代码逻辑完全一致
             data = {
                 'img_prefix': input_dir,
                 'img_info': {'filename': filename},
+                'img': img  # <-- 预加载的图像在这里
             }
-            # 通过完整的 pipeline 处理
+            # =====================================================
+
+            # 3. 将这个“半成品”字典送入 Pipeline
             processed_data = test_pipeline(data)
 
-            # 准备模型输入
+            # --- 后续的模型推理和保存逻辑保持不变 ---
             img_tensor = processed_data['img'][0].unsqueeze(0).to(device)
 
             with torch.no_grad():
-                # 使用 model.module 访问 DDP 包装下的原始模型
-                # 调用 forward_test 而不是内部的 diffusion.forward_test，这更标准
                 enhanced_img_tensor = model.module.forward_test(img_tensor)
 
-            # 后处理
+            # ... (后处理、保存、可视化等代码) ...
             enhanced_img = enhanced_img_tensor.squeeze().permute(1, 2, 0).cpu().numpy()
             enhanced_img = (enhanced_img * cfg.img_norm_cfg['std'] + cfg.img_norm_cfg['mean'])
             enhanced_img = np.clip(enhanced_img, 0, 255).astype(np.uint8)
             final_img = cv2.cvtColor(enhanced_img, cv2.COLOR_RGB2BGR)
 
-            # 调整尺寸和保存
             if coco_processor:
                 annotations, img_info = coco_processor.get_annotations(filename)
                 if img_info:
@@ -144,6 +144,7 @@ def process_images_loop(model, input_dir: str, output_dir: str, config_path: str
                     cv2.imwrite(images_path, final_img_resized)
 
                     if annotations:
+                        # ... (可视化代码) ...
                         visible_dir = os.path.join(output_dir, 'visible')
                         visualized_img = final_img_resized.copy()
                         for ann in annotations:
@@ -158,13 +159,13 @@ def process_images_loop(model, input_dir: str, output_dir: str, config_path: str
                 images_path = os.path.join(output_dir, 'images', filename)
                 cv2.imwrite(images_path, final_img)
 
+
         except Exception as e:
             print(f"\nRank {rank} error processing {filename}: {e}", file=sys.stderr)
             traceback.print_exc(file=sys.stderr)
 
-        # [修正] 更新总进度条
         if rank == 0:
-            progress_bar.update(world_size)  # 估算更新，假设所有GPU速度差不多
+            progress_bar.update(1)
 
     if rank == 0:
         progress_bar.close()
