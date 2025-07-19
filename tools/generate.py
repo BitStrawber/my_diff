@@ -12,26 +12,31 @@ from typing import List, Dict, Optional, Tuple
 from tqdm import tqdm
 import sys
 import argparse
-from torch.utils.data import Dataset, DataLoader
+import traceback
 
-# 确保项目路径被包含，以便导入自定义模块
+# 确保项目路径被包含
 sys.path.append('./')
-from EnDiff import *  # 假设 EnDiff 等模块在此文件中
+# 动态导入模型，以支持 EnDiff 和 EnDiff0
+try:
+    from EnDiff import EnDiff, EnDiff0, MyGaussianBlur
+except ImportError:
+    print("Warning: Could not import EnDiff models. Ensure EnDiff.py is in the path.")
 
 # ==============================================================================
 # ======                          配置区域                           ======
 # ==============================================================================
-CONFIG_PATH = './config/EnDiff_r50_diff.py'
-CHECKPOINT_PATH = './work_dirs/EnDiff_r50_diff/epoch_9.pth'
-INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
-OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
-ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'
+# 使用默认值，但可以通过命令行参数覆盖
+DEFAULT_CONFIG_PATH = './config/EnDiff_r50_diff.py'
+DEFAULT_CHECKPOINT_PATH = './work_dirs/EnDiff_r50_diff/epoch_9.pth'
+DEFAULT_INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
+DEFAULT_OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
+DEFAULT_ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'
 
 
 # ==============================================================================
 
 class CocoProcessor:
-    """专业的COCO标注处理器（保持标注原始尺寸）"""
+    """专业的COCO标注处理器"""
 
     def __init__(self, annotation_path: str):
         if not os.path.exists(annotation_path):
@@ -41,7 +46,6 @@ class CocoProcessor:
         self.cat_id_to_name = {cat['id']: cat['name'] for cat in self.coco.dataset['categories']}
 
     def get_annotations(self, filename: str) -> Tuple[List[Dict], Optional[Dict]]:
-        """获取指定文件名的标注信息和图像元数据"""
         img_info = self.filename_to_info.get(filename)
         if img_info is None:
             return [], None
@@ -50,9 +54,13 @@ class CocoProcessor:
 
 
 class InferenceDataset(Dataset):
-    """为高效推理定制的数据集"""
+    """
+    为高效推理定制的数据集
+    - 手动加载图像以增强对坏文件的鲁棒性
+    - Pipeline 不再需要 LoadImageFromFile
+    """
 
-    def __init__(self, file_paths: List[str], pipeline: List[Dict]):
+    def __init__(self, file_paths: List[str], pipeline: Compose):
         self.file_paths = file_paths
         self.pipeline = pipeline
 
@@ -65,16 +73,24 @@ class InferenceDataset(Dataset):
         try:
             img = mmcv.imread(img_path)
             if img is None:
-                raise IOError(f"Failed to read image: {img_path}")
+                raise IOError(f"Failed to read image or image is corrupted: {img_path}")
 
+            # 准备送入 pipeline 的数据
             data = {'img': img, 'img_info': {'filename': filename}, 'img_prefix': None}
             processed_data = self.pipeline(data)
 
             img_tensor = processed_data['img'][0] if isinstance(processed_data['img'], list) else processed_data['img']
 
             return {'filename': filename, 'img': img_tensor, 'status': 'ok'}
+
         except Exception as e:
-            print(f"Warning: Error processing {img_path}, skipping. Error: {e}", file=sys.stderr)
+            # 仅在主进程打印详细错误，避免信息泛滥
+            if int(os.environ.get('RANK', 0)) == 0:
+                print(f"\n--- Data Loading Error ---", file=sys.stderr)
+                print(f"Warning: Error processing {img_path}, skipping. Error: {e}", file=sys.stderr)
+                traceback.print_exc(file=sys.stderr)
+                print("--- End of Error ---", file=sys.stderr)
+            # 返回一个错误标记和占位符张量
             return {'filename': filename, 'img': torch.zeros(3, 32, 32), 'status': 'error'}
 
 
@@ -94,9 +110,7 @@ def resize_to_annotation_size(img: np.ndarray, target_size: Tuple[int, int]) -> 
     target_w, target_h = target_size
     scale = min(target_w / w, target_h / h)
     new_w, new_h = int(w * scale), int(h * scale)
-
     resized_img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
-
     padded_img = np.zeros((target_h, target_w, 3), dtype=np.uint8)
     padded_img[:new_h, :new_w] = resized_img
     return padded_img
@@ -126,12 +140,14 @@ def save_and_visualize(image: np.ndarray, filename: str, output_dir: str, coco_p
 def process_images_dist(model, input_dir: str, output_dir: str, annotation_path: Optional[str],
                         cfg: mmcv.Config, rank: int, world_size: int, device: torch.device):
     """分布式处理图像的核心函数"""
+    # 1. 设置和同步
     if rank == 0:
         os.makedirs(os.path.join(output_dir, 'images'), exist_ok=True)
         os.makedirs(os.path.join(output_dir, 'visible'), exist_ok=True)
     if dist.is_initialized():
         dist.barrier()
 
+    # 2. 每个进程都加载COCO处理器，因为后处理是分布式的
     coco_processor = None
     if annotation_path and os.path.exists(annotation_path):
         try:
@@ -142,32 +158,38 @@ def process_images_dist(model, input_dir: str, output_dir: str, annotation_path:
             if rank == 0:
                 print(f"Warning: Failed to load COCO annotations - {e}", file=sys.stderr)
 
-    test_pipeline = build_test_pipeline(cfg).transforms[1].transforms
+    # 3. 构建数据集和数据加载器
+    test_pipeline = build_test_pipeline(cfg)
     all_files = sorted(
         [os.path.join(input_dir, f) for f in os.listdir(input_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
 
-    # 每个进程只处理自己的文件子集
-    local_files = [f for i, f in enumerate(all_files) if i % world_size == rank]
+    dataset = InferenceDataset(all_files, test_pipeline)
+    sampler = torch.utils.data.distributed.DistributedSampler(dataset, num_replicas=world_size, rank=rank,
+                                                              shuffle=False)
 
-    dataset = InferenceDataset(local_files, test_pipeline)
-    # 根据你的GPU显存调整 batch_size 和 num_workers
-    data_loader = DataLoader(dataset, batch_size=8, shuffle=False, num_workers=4, pin_memory=True)
+    # 根据GPU显存调整 batch_size 和 num_workers
+    data_loader = torch.utils.data.DataLoader(dataset, batch_size=8, shuffle=False, num_workers=4, pin_memory=True,
+                                              sampler=sampler)
 
-    progress_bar = tqdm(total=len(all_files), desc="Processing", position=0, disable=(rank != 0))
+    # 4. 主进程创建进度条
+    if rank == 0:
+        data_loader = tqdm(data_loader, desc="Processing Images")
 
+    # 5. 核心处理循环
     for batch_data in data_loader:
         valid_mask = [status == 'ok' for status in batch_data['status']]
         if not any(valid_mask):
-            if rank == 0:
-                progress_bar.update(len(batch_data['filename']))
             continue
 
         filenames = [fn for fn, m in zip(batch_data['filename'], valid_mask) if m]
         img_tensors = torch.stack([img for img, m in zip(batch_data['img'], valid_mask) if m]).to(device)
 
         with torch.no_grad():
-            enhanced_batch = model.module.diffusion.forward_test(img_tensors)
+            # 使用 model.module 访问DDP包装下的原始模型
+            # 确保调用正确的推理函数，与您的模型定义一致
+            enhanced_batch = model.module.forward_test(img_tensors)
 
+        # 6. 后处理和保存
         for i, filename in enumerate(filenames):
             enhanced_img_tensor = enhanced_batch[i]
             final_img = post_process_output(enhanced_img_tensor, cfg)
@@ -180,16 +202,15 @@ def process_images_dist(model, input_dir: str, output_dir: str, annotation_path:
 
             save_and_visualize(final_img, filename, output_dir, coco_processor)
 
-        if rank == 0:
-            progress_bar.update(len(batch_data['filename']))
-
-    progress_bar.close()
-
 
 def load_model_and_cfg(config_path: str, checkpoint_path: str, device: torch.device):
     """加载模型和配置"""
     cfg = mmcv.Config.fromfile(config_path)
-    model = build_detector(cfg.model)
+    # 确保自定义模型被导入
+    if 'custom_imports' in cfg:
+        mmcv.utils.import_modules_from_strings(**cfg.custom_imports)
+
+    model = build_detector(cfg.model, train_cfg=None, test_cfg=cfg.get('test_cfg'))
     checkpoint = load_checkpoint(model, checkpoint_path, map_location='cpu')
     if 'CLASSES' in checkpoint.get('meta', {}):
         model.CLASSES = checkpoint['meta']['CLASSES']
@@ -199,20 +220,20 @@ def load_model_and_cfg(config_path: str, checkpoint_path: str, device: torch.dev
 
 
 def build_test_pipeline(cfg: mmcv.Config) -> Compose:
-    """构建测试数据流水线"""
-    return Compose([
-        dict(type='LoadImageFromFile'),
-        dict(type='MultiScaleFlipAug',
-             img_scale=(1920, 1080),
-             flip=False,
-             transforms=[
-                 dict(type='Resize', keep_ratio=True),
-                 dict(type='Normalize', **cfg.img_norm_cfg),
-                 dict(type='Pad', size_divisor=32),
-                 dict(type='ImageToTensor', keys=['img']),
-                 dict(type='Collect', keys=['img'])
-             ])
-    ])
+    """
+    构建测试数据流水线
+    关键: 从流水线中移除 'LoadImageFromFile'
+    """
+    pipeline_cfg = cfg.data.test.pipeline
+
+    for transform in pipeline_cfg:
+        if transform['type'] == 'MultiScaleFlipAug':
+            pipeline_cfg = transform['transforms']
+            break
+
+    final_pipeline_cfg = [p for p in pipeline_cfg if p['type'] != 'LoadImageFromFile']
+
+    return Compose(final_pipeline_cfg)
 
 
 def init_distributed() -> Tuple[bool, int, int, int]:
@@ -230,11 +251,13 @@ def init_distributed() -> Tuple[bool, int, int, int]:
 def parse_args() -> argparse.Namespace:
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description='分布式图像增强与标注处理工具')
-    parser.add_argument('--config', default=CONFIG_PATH, help='模型配置文件路径')
-    parser.add_argument('--checkpoint', default=CHECKPOINT_PATH, help='模型权重文件路径')
-    parser.add_argument('--input', default=INPUT_DIR, help='输入图像目录路径')
-    parser.add_argument('--output', default=OUTPUT_DIR, help='输出目录路径')
-    parser.add_argument('--annotation', default=ANNOTATION_PATH, help='COCO标注文件路径')
+    parser.add_argument('--config', default=DEFAULT_CONFIG_PATH, help='模型配置文件路径')
+    parser.add_argument('--checkpoint', default=DEFAULT_CHECKPOINT_PATH, help='模型权重文件路径')
+    parser.add_argument('--input', default=DEFAULT_INPUT_DIR, help='输入图像目录路径')
+    parser.add_argument('--output', default=DEFAULT_OUTPUT_DIR, help='输出目录路径')
+    parser.add_argument('--annotation', default=DEFAULT_ANNOTATION_PATH, help='COCO标注文件路径 (可选)')
+    parser.add_argument('--batch-size', type=int, default=8, help='每个GPU的批处理大小')
+    parser.add_argument('--num-workers', type=int, default=4, help='每个进程的数据加载工作线程数')
     return parser.parse_args()
 
 
@@ -245,18 +268,22 @@ if __name__ == '__main__':
 
     try:
         if rank == 0:
-            print(f"Loading model from {args.checkpoint}...")
+            print(f"Loading model from config: {args.config}")
+            print(f"Loading checkpoint: {args.checkpoint}")
         model, cfg = load_model_and_cfg(args.config, args.checkpoint, device)
 
         if distributed:
-            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[gpu])
+            # 使用 find_unused_parameters=True 是一个好习惯，特别是对于复杂的模型
+            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[gpu], find_unused_parameters=True)
 
-        model.eval()
+        # model.eval() 已经在 load_model_and_cfg 中设置好了
 
         if rank == 0:
-            print(f"\nProcessing images from {args.input}...")
-        if not os.path.isdir(args.input):
-            raise FileNotFoundError(f"Input directory not found: {args.input}")
+            print(f"\nProcessing images from: {args.input}")
+            print(f"Saving results to: {args.output}")
+            if not os.path.isdir(args.input):
+                raise FileNotFoundError(f"Input directory not found: {args.input}")
+            print(f"Running on {world_size} GPUs with batch size {args.batch_size} each.")
 
         process_images_dist(model, args.input, args.output, args.annotation, cfg, rank, world_size, device)
 
@@ -267,12 +294,14 @@ if __name__ == '__main__':
             print("\n" + "=" * 50)
             print("All tasks completed successfully!")
             print(f"Results saved to:")
-            print(f"- Resized enhanced images: {os.path.join(args.output, 'images')}")
-            print(f"- Annotated visualized images: {os.path.join(args.output, 'visible')}")
+            print(f"- Enhanced images: {os.path.join(args.output, 'images')}")
+            if args.annotation and os.path.exists(args.annotation):
+                print(f"- Visualized images: {os.path.join(args.output, 'visible')}")
             print("=" * 50)
 
     except Exception as e:
         print(f"\nAn error occurred on Rank {rank}: {e}", file=sys.stderr)
-        import traceback
-
         traceback.print_exc()
+    finally:
+        if dist.is_initialized():
+            dist.destroy_process_group()
