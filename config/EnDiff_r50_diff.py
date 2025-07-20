@@ -135,7 +135,7 @@ classes = [
 ]
 
 data = dict(
-    samples_per_gpu=2,
+    samples_per_gpu=4,
     workers_per_gpu=8,
     train=dict(
         type=dataset_type,
@@ -164,7 +164,7 @@ data = dict(
 evaluation = dict(interval=1, save_best='auto', classwise=True)
 
 optimizer = dict(
-    lr=0.0025,
+    lr=0.0002,
     paramwise_cfg=dict(
         custom_keys=dict(diffusion=dict(lr_mult=0.1, decay_mult=5.0))))
 
@@ -180,7 +180,7 @@ lr_config = dict(
     warmup_ratio=0.001,
     warmup_start=0)
 
-auto_scale_lr = dict(enable=True, base_batch_size=2)
+auto_scale_lr = dict(enable=True, base_batch_size=8)
 
 runner = dict(max_epochs=300)
 log_config = dict(
