@@ -55,7 +55,7 @@ class EnDiff0(BaseModule):
             self,
             net,
             T=1000,
-            diffuse_ratio=0.6,
+            diffuse_ratio=1.0,
             sample_times=10,
             land_loss_weight=1,
             uw_loss_weight=1 * test,
