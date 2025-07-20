@@ -6,20 +6,19 @@ _base_ = [
 # model
 num_classes = 30
 model = dict(
-    type='EnDiffO',
-    init_cfg= None,
+    type='EnDiffDet',
+    init_cfg=dict(
+        type='Pretrained',
+        checkpoint='torchvision://resnet50'
+    ),
     diff_cfg=dict(
-        type='EnDiff',
+        type='EnDiff1',
         net=dict(type='PM', channels=16, time_channels=16),
         diffuse_ratio=0.6,
         sample_times=15,
         land_loss_weight=1,
-        uw_loss_weight=10),
-    backbone=dict(
-        frozen_stages=-1,  # 不冻结
-        norm_eval=True,  # 仅冻结BN
-        init_cfg=None
-    ),
+        uw_loss_weight=1),
+    backbone=dict(frozen_stages=-1, init_cfg=None),
     roi_head=dict(
         bbox_head=[
             dict(
@@ -134,10 +133,10 @@ classes = [
     'brain coral', 'eel', 'hammerhead', 'mud turtle', 'sea urchin', 'terrapin',
     'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
 ]
+
 data = dict(
-    samples_per_gpu=2,
+    samples_per_gpu=1,
     workers_per_gpu=4,
-    persistent_workers=True,  # 提高DDP数据加载效率
     train=dict(
         type=dataset_type,
         hq_img_prefix=hq_img_prefix,
@@ -165,15 +164,9 @@ data = dict(
 evaluation = dict(interval=1, save_best='auto', classwise=True)
 
 optimizer = dict(
-    type='AdamW',
-    lr=1e-4,
-    betas=(0.9, 0.999),
-    weight_decay=0.01,
+    lr=0.0025,
     paramwise_cfg=dict(
-        custom_keys={
-            'diffusion': dict(lr_mult=1.0),
-            'backbone': dict(lr_mult=0.1)
-        }))
+        custom_keys=dict(diffusion=dict(lr_mult=0.1, decay_mult=5.0))))
 
 epoch_iter = 2262
 lr_config = dict(
@@ -187,20 +180,20 @@ lr_config = dict(
     warmup_ratio=0.001,
     warmup_start=0)
 
-runner = dict(
-    type='EpochBasedRunner',
-    max_epochs=24,
-    dynamic_loss_scale=True
-)
+auto_scale_lr = dict(enable=True, base_batch_size=2)
+
+runner = dict(max_epochs=24)
 log_config = dict(
     interval=50,
     hooks=[dict(type='TextLoggerHook')])
 custom_hooks = [
     dict(type='NumClassCheckHook'),
+    dict(
+        type='TrainModeControlHook', train_modes=['sample', 'det'], num_epoch=[6, 6])
 ]
 fp16 = dict(loss_scale=512.0)
-workflow = [('train', 1), ('val', 1)]
 
+find_unused_parameters = True
 # ====== 配置区域 ======
 # CONFIG_PATH = './config/EnDiff_r50_diff.py'
 # CHECKPOINT_PATH = './work_dirs/EnDiff_r50_diff/epoch_9.pth'
