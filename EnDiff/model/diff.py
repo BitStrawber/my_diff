@@ -71,8 +71,8 @@ class EnDiff1(BaseModule):
     # =============================================================================
     def loss(self, r_prev: torch.Tensor, h_prev: torch.Tensor, noise_pred: torch.Tensor, noise_gt: torch.Tensor):
 
-        r = torch.flatten(r_prev_lf, 1)
-        h = torch.flatten(h_prev_lf, 1)
+        r = torch.flatten(r_prev, 1)
+        h = torch.flatten(h_prev, 1)
         r = F.log_softmax(r, dim=-1)
         h = F.log_softmax(h, dim=-1)
         # 计算光场特征的 L1 损失
