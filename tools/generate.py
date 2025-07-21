@@ -168,11 +168,22 @@ def load_model(config_path, checkpoint_path, device=None):
 
 
 def build_test_pipeline(cfg):
-    """
-    这个函数现在直接返回您配置文件中的 test pipeline 定义，
-    因为我们已经确认它在您的“预加载”模式下可以工作。
-    """
-    return Compose(cfg.data.test.pipeline)
+
+    return Compose([
+        dict(type='LoadImageFromFile'),
+        dict(
+            type='MultiScaleFlipAug',
+            img_scale=(1920, 1080),
+            flip=False,
+            transforms=[
+                dict(type='Resize', keep_ratio=True),
+                dict(type='Normalize', **cfg.img_norm_cfg),
+                dict(type='Pad', size_divisor=32),
+                dict(type='CropPadding'),
+                dict(type='ImageToTensor', keys=['img']),
+                dict(type='Collect', keys=['img'], meta_keys=[])
+            ])
+    ])
 
 
 def init_distributed():
