@@ -104,7 +104,10 @@ def process_images(model, input_dir: str, output_dir: str, config_path: str,
                 if rank == 0: print(f"Warning: Skipping corrupted image {img_path}", file=sys.stderr)
                 continue
 
-            data = {'img_prefix': input_dir, 'img_info': {'filename': filename}, 'img': img}
+            data = {'img_prefix': input_dir,
+                    'img_info': {'filename': filename},
+                    'img': img,
+                    'hq_img_filename': img_path}
             processed_data = test_pipeline(data)
 
             img_tensor = processed_data['img'][0].unsqueeze(0) if isinstance(processed_data['img'], list) else \
