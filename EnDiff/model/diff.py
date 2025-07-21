@@ -30,7 +30,7 @@ class EnDiff1(BaseModule):
             uw_loss_weight=1 * test,
             init_cfg=None,
     ):
-        super(EnDiff0, self).__init__(init_cfg)
+        super(EnDiff1, self).__init__(init_cfg)
         self.net = MODELS.build(net)
         self.T = T
         self.diffuse_ratio = diffuse_ratio
