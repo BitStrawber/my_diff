@@ -161,7 +161,15 @@ data = dict(
         img_prefix=data_root+'images/',
         pipeline=test_pipeline
     ))
-evaluation = dict(interval=1, save_best='auto', classwise=True)
+
+checkpoint_config = dict(
+    interval=1,                # 每隔 1 个 epoch 保存一次检查点。
+    max_keep_ckpts=10,         # 关键参数：在工作目录中最多只保留最近的 10 个检查点文件。
+                               # 当保存第 11 个时，最早的那个会被自动删除。
+    save_last=True             # 推荐保留，确保最后一个 epoch 的检查点总会被保存。
+)
+
+evaluation = dict(interval=10, save_best='auto', classwise=True)
 
 optimizer = dict(
     lr=0.0025,
