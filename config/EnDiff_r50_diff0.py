@@ -169,7 +169,7 @@ checkpoint_config = dict(
     save_last=True             # 推荐保留，确保最后一个 epoch 的检查点总会被保存。
 )
 
-evaluation = dict(interval=10, save_best='auto', classwise=True)
+evaluation = dict(interval=1, save_best='auto', classwise=True)
 
 optimizer = dict(
     lr=0.0025,
