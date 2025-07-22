@@ -41,13 +41,13 @@ class HqLqCocoDataset(CocoDataset):
         self.hq_img_num = len(self.hq_img_names)
 
     def pre_pipeline(self, results):
-        # super().pre_pipeline(results)
-        # # Get the filename of the HQ image based on the LQ image filename
-        # lq_filename = results['img_info']['file_name']
-        # hq_filename = lq_filename  # Assuming HQ and LQ images have the same filename
-        # results['hq_img_filename'] = osp.join(self.hq_img_dir, hq_filename)
-        # # Print the results dictionary
-        # # print(f"Results dictionary: {results}")
         super().pre_pipeline(results)
-        idx = randint(0, self.hq_img_num - 1)
-        results['hq_img_filename'] = osp.join(self.hq_img_dir, self.hq_img_names[idx])
+        # Get the filename of the HQ image based on the LQ image filename
+        lq_filename = results['img_info']['file_name']
+        hq_filename = lq_filename  # Assuming HQ and LQ images have the same filename
+        results['hq_img_filename'] = osp.join(self.hq_img_dir, hq_filename)
+        # Print the results dictionary
+        # print(f"Results dictionary: {results}")
+        # super().pre_pipeline(results)
+        # idx = randint(0, self.hq_img_num - 1)
+        # results['hq_img_filename'] = osp.join(self.hq_img_dir, self.hq_img_names[idx])
