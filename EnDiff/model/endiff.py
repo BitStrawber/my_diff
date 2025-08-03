@@ -174,8 +174,10 @@ class EnDiff0(BaseModule):
             _, rt_prev, noise_pred = self.predict(rt_prev, u0, torch.full((batch_size,), self.t_list[-1], device=device,
                                                                           dtype=torch.long))
 
+        ht_prev, _ = self.q_diffuse(h0, torch.full((batch_size,), self.t_list[train_idx - 1], device=device,
+                                                   dtype=torch.long))
 
-        return self.loss(rt_prev, h0, noise_pred, noise_gt)
+        return self.loss(rt_prev, ht_prev, noise_pred, noise_gt)
 
     def forward_test(self, u0):
         device = u0.device
