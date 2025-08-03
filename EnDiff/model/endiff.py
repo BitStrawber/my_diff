@@ -135,7 +135,33 @@ class EnDiff0(BaseModule):
         device = u0.device
         batch_size = u0.shape[0]
 
-        train_idx = random.randint(1, len(self.t_list) - 1)
+        # =====================================================================
+        # === 核心修改：同步 train_idx 以支持分布式训练 (DDP) ===
+        # =====================================================================
+        # 1. 创建一个用于存储 train_idx 的张量，所有进程都有
+        train_idx_tensor = torch.zeros(1, dtype=torch.long, device=device)
+
+        # 2. 检查分布式环境是否已经初始化，并且只在主进程 (rank 0) 上生成随机数
+        if dist.is_available() and dist.is_initialized():
+            if dist.get_rank() == 0:
+                # 在 rank 0 上生成随机整数
+                idx = random.randint(1, len(self.t_list) - 1)
+                train_idx_tensor[0] = idx
+
+            # 3. 将 rank 0 上的随机数张量广播给所有其他进程
+            #    此操作后，所有进程的 train_idx_tensor 的值都将与 rank 0 相同
+            dist.broadcast(train_idx_tensor, src=0)
+        else:
+            # 如果不是分布式训练（例如单卡训练），则像原来一样正常生成随机数
+            idx = random.randint(1, len(self.t_list) - 1)
+            train_idx_tensor[0] = idx
+
+        # 4. 从张量中获取所有进程都一致的 train_idx
+        train_idx = train_idx_tensor.item()
+        # =====================================================================
+        # === 修改结束，后续的多步采样逻辑保持完全不变 ===
+        # =====================================================================
+
         rs, noise_gt = self.q_diffuse(u0, torch.full((batch_size,), self.t_end, device=device, dtype=torch.long))
 
         rt_prev = rs
