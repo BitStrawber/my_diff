@@ -25,11 +25,11 @@ except ImportError:
 # ==============================================================================
 # ======                          配置区域                           ======
 # ==============================================================================
-DEFAULT_CONFIG_PATH = './config/EnDiff_r50_diff.py'
+DEFAULT_CONFIG_PATH = './config/EnDiff_r50_diff0.py'
 DEFAULT_CHECKPOINT_PATH = './work_dirs/EnDiff_r50_diff/epoch_9.pth'
-DEFAULT_INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
-DEFAULT_OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
-DEFAULT_ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'
+DEFAULT_INPUT_DIR = '/media/HDD0/XCX/fusions/images'
+DEFAULT_OUTPUT_DIR = '/media/HDD0/XCX/enhanced'
+DEFAULT_ANNOTATION_PATH = '/media/HDD0/XCX/fusions/annotations/annotations/split_results/part2.json'
 
 
 # ==============================================================================

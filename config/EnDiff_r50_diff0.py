@@ -4,7 +4,7 @@ _base_ = [
 ]
 
 # model
-num_classes = 30
+num_classes = 26
 model = dict(
     type='EnDiffDet',
     init_cfg=dict(
@@ -117,21 +117,20 @@ test_pipeline = [
         ])
 ]
 dataset_type = 'HqLqCocoDataset'
-hq_img_prefix = '/media/HDD0/XCX/backgrounds/'
-data_root = '/media/HDD0/XCX/synthetic_dataset/'
-train_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/train.json'
-test_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/test.json'
+hq_img_prefix = '/media/HDD0/XCX/selected_backgrounds/'
+data_root = '/media/HDD0/XCX/fusions/'
+train_ann = '/media/HDD0/XCX/fusions/annotations/annotations/split_results/part1_train.json'
+test_ann = '/media/HDD0/XCX/fusions/annotations/annotations/split_results/part1_test.json'
 # hq_img_prefix = '/home/xcx/桌面/ddpm/en-diff/data/enhance/'
 # data_root = '/home/xcx/桌面/ddpm/en-diff/data/mydata/'
 # train_ann = '/home/xcx/桌面/ddpm/en-diff/data/mydata/annotations/instances_train.json'
 # test_ann = '/home/xcx/桌面/ddpm/en-diff/data/mydata/annotations/instances_test.json'
 
 classes = [
-    'anemone fish', 'coho', 'gar', 'leatherback turtle', 'rock beauty', 'stingray',
-    'barracouta', 'conch', 'goldfish', 'lionfish', 'sea anemone', 'sturgeon',
-    'box turtle', 'coral reef', 'great white shark', 'loggerhead', 'sea slug', 'tench',
-    'brain coral', 'eel', 'hammerhead', 'mud turtle', 'sea urchin', 'terrapin',
-    'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
+    'anemone_fish', 'eel', 'great_white_shark', 'lionfish', 'rock_beauty', 'starfish', 'terrapin',
+    'barracouta', 'electric_ray', 'hammerhead', 'loggerhead', 'scuba_diver', 'stingray', 'tiger_shark',
+    'box_turtle', 'gar', 'jellyfish', 'mud_turtle', 'sea_cucumber', 'sturgeon',
+    'coho', 'goldfish', 'leatherback_turtle', 'puffer', 'sea_urchin', 'tench'
 ]
 
 data = dict(
@@ -180,8 +179,8 @@ epoch_iter = 2262
 lr_config = dict(
     _delete_=True,
     policy='MulStep',
-    step=[0, 6 * epoch_iter, 12 * epoch_iter, 20 * epoch_iter, 23 * epoch_iter],
-    lr_mul=[1, 0.1, 1, 0.1, 0.01],
+    step=[0, 6 * epoch_iter, 12 * epoch_iter, 20 * epoch_iter, 23 * epoch_iter, 64 * epoch_iter],
+    lr_mul=[1, 0.1, 1, 0.1, 0.01, 1],
     by_epoch=False,
     warmup='linear',
     warmup_iters=500,
@@ -189,8 +188,7 @@ lr_config = dict(
     warmup_start=0)
 
 auto_scale_lr = dict(enable=True, base_batch_size=2)
-
-runner = dict(max_epochs=24)
+runner = dict(max_epochs=64)
 log_config = dict(
     interval=50,
     hooks=[dict(type='TextLoggerHook')])
