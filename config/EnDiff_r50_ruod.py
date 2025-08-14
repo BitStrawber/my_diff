@@ -19,7 +19,7 @@ num_classes = 10
 model = dict(
     init_cfg=dict(
         type='Pretrained',
-        checkpoint='./work_dirs/det/epoch_24.pth'
+        checkpoint='./work_dirs/compare/epoch_24.pth'
     ),
     roi_head=dict(
         bbox_head=[

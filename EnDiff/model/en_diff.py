@@ -12,6 +12,7 @@ from mmdet.models.builder import MODELS
 
 r = 0
 s = [15,60,90]
+test = 1.0
 class MyGaussianBlur(torch.nn.Module):
     # 初始化
     def __init__(self, radius=1, sigema=1.5):
@@ -44,17 +45,16 @@ class MyGaussianBlur(torch.nn.Module):
         new_pic2 = torch.nn.functional.conv2d(image, weight, padding=self.radius, groups=3)
         return new_pic2
 
-@DETECTORS.register_module()
 @MODELS.register_module()
 class EnDiff(BaseModule):
     def __init__(
             self,
             net,
             T=1000,
-            diffuse_ratio=0.6,
+            diffuse_ratio=1.0,
             sample_times=10,
             land_loss_weight=1,
-            uw_loss_weight=1,
+            uw_loss_weight=1*test,
             init_cfg=None,
     ):
         super(EnDiff, self).__init__(init_cfg)
@@ -74,21 +74,20 @@ class EnDiff(BaseModule):
         # 初始化计数器
         self.counter = 0
 
+        s = [15, 60, 90]
+        self.guas_15 = MyGaussianBlur(radius=s[0], sigema=s[0]).cuda()
+        self.guas_60 = MyGaussianBlur(radius=s[1], sigema=s[1]).cuda()
+        self.guas_90 = MyGaussianBlur(radius=s[2], sigema=s[2]).cuda()
+
+        self.temp_15 = self.guas_15.template()
+        self.temp_60 = self.guas_60.template()
+        self.temp_90 = self.guas_90.template()
+
     # 光场滤波器，获得光场信息并返回
     def MutiScaleLuminanceEstimation(self, img):
-        guas_15 = MyGaussianBlur(radius=15, sigema=15).cuda()
-        temp_15 = guas_15.template()
-
-        guas_60 = MyGaussianBlur(radius=60, sigema=60).cuda()
-        temp_60 = guas_60.template()
-
-        guas_90 = MyGaussianBlur(radius=90, sigema=90).cuda()
-        temp_90 = guas_90.template()
-
-        x_15 = guas_15.filter(img, temp_15)
-        x_60 = guas_60.filter(img, temp_60)
-        x_90 = guas_90.filter(img, temp_90)
-
+        x_15 = self.guas_15.filter(img, self.temp_15)
+        x_60 = self.guas_60.filter(img, self.temp_60)
+        x_90 = self.guas_90.filter(img, self.temp_90)
         img = (x_15 + x_60 + x_90) / 3
         return img
 
@@ -125,22 +124,35 @@ class EnDiff(BaseModule):
         h = F.log_softmax(h, dim=-1)
         # 计算光场特征的 L1 损失
         land_loss = F.kl_div(r, h, log_target=True, reduction='batchmean') * self.land_loss_weight
-        # land_loss = F.kl_div(r, h, log_target=True, reduction='batchmean') * self.land_loss_weight
 
         uw_loss = F.mse_loss(noise_pred, noise_gt, reduction='mean') * self.uw_loss_weight
         return dict(land_loss=land_loss, uw_loss=uw_loss)
 
+    def get_x0_from_noise(self, xt, t, noise):
+        """根据 xt, t 和预测的噪声，反解出 x0"""
+        alpha_cumprod = self.get_alpha_cumprod(t).to(xt.device)
+        x0_pred = (xt - torch.sqrt(1 - alpha_cumprod) * noise) / torch.sqrt(alpha_cumprod)
+        return x0_pred
+
     def forward_train(self, u0: torch.Tensor, h0: torch.Tensor):
-        train_idx = random.randint(1, len(self.t_list) - 1)
-        rs, noise_gt = self.q_diffuse(u0, torch.full((1,), self.t_end, device=u0.device))  # 低质量图像加噪结果，加噪到底
+        # 1. 为当前 batch 中的每个样本随机采样一个时间步 t
+        t = torch.randint(1, self.t_end + 1, (u0.shape[0],), device=u0.device).long()
 
-        rt_prev = rs
-        for i, t in enumerate(self.t_list[:train_idx - 1:-1]):
-            _, rt_prev, noise_pred = self.predict(rt_prev, u0, torch.full((1,), t, device=u0.device))
+        # 2. 对低质量图像 u0 进行一步加噪，得到加噪图 ut 和真实噪声 noise_gt
+        ut, noise_gt = self.q_diffuse(u0, t)
 
-        ht_prev, _ = self.q_diffuse(h0, torch.full((1,), self.t_list[train_idx - 1], device=u0.device))  # 高质量图像加噪结果
+        # 3. 让网络从 (ut, t) 预测噪声，以 u0 作为条件
+        noise_pred = self.net(ut, t, u0)
 
-        return self.loss(rt_prev, ht_prev, noise_pred, noise_gt)
+        # 4. (可选但推荐) 从预测的噪声反解出预测的 x0
+        x0_pred = self.get_x0_from_noise(ut, t, noise_pred)
+        # 也许需要对 x0_pred 进行 clamp，以匹配图像的范围，例如 [-1, 1] 或 [0, 1]
+        # x0_pred.clamp_(-1., 1.)
+
+        # ht, _ = self.q_diffuse(h0, t, noise=None)
+
+        # 5. 将所有需要的张量传递给独立的 loss 函数
+        return self.loss(x0_pred, h0, noise_pred, noise_gt)
 
     # 输入第质量与高质量图像，向loss中输入（预测去噪结果，真实目标数据，预测噪声，真实噪声）：
 
@@ -150,20 +162,16 @@ class EnDiff(BaseModule):
         rs, _ = self.q_diffuse(u0, torch.full((1,), self.t_end, device=u0.device))
 
         rt_prev = rs
-        for i, t in enumerate(self.t_list[:1:-1]):
-            r0, rt_prev, _ = self.predict(rt_prev, u0, torch.full((1,), t, device=u0.device))
+        # 迭代采样生成最终图像
+        # 注意 t_list 应该从 t_end 遍历到 1
+        for t_val in reversed(self.t_list):
+            if t_val == 0: continue
+            t = torch.full((u0.shape[0],), t_val, device=u0.device)
+            r0, rt_prev, _ = self.predict(rt_prev, u0, t)
 
-        # temp = r0
-        # # 将 r0 转换为 [0, 1] 范围
-        # temp = (temp - temp.min()) / (temp.max() - temp.min())
-        # # 生成文件名
-        # filename = f'output_image_{self.counter:04d}.png'  # 按序号生成文件名
-        # self.counter += 1  # 递增计数器
-        # # 保存图像
-        # save_path_full = os.path.join(save_path, filename)
-        # vutils.save_image(temp, save_path_full, normalize=True)
+        final_r0, _, _ = self.predict(rt_prev, u0, torch.full((u0.shape[0],), self.t_list[0], device=u0.device))
 
-        return r0
+        return final_r0
 
     def forward(self, u0: torch.Tensor, h0: torch.Tensor = None, return_loss: bool = True):
         if return_loss:

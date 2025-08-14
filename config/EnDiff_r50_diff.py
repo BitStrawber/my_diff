@@ -9,7 +9,7 @@ model = dict(
     type='EnDiffDet',
     init_cfg=dict(
         type='Pretrained',
-        checkpoint=None
+        checkpoint='torchvision://resnet50'
     ),
     diff_cfg=dict(
         type='EnDiff',
@@ -17,7 +17,7 @@ model = dict(
         diffuse_ratio=0.6,
         sample_times=15,
         land_loss_weight=1,
-        uw_loss_weight=10),
+        uw_loss_weight=1),
     backbone=dict(frozen_stages=-1, init_cfg=None),
     roi_head=dict(
         bbox_head=[
@@ -121,10 +121,11 @@ hq_img_prefix = '/media/HDD0/XCX/backgrounds/'
 data_root = '/media/HDD0/XCX/synthetic_dataset/'
 train_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/train.json'
 test_ann = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/test.json'
-# hq_img_prefix = './data/coco2017/train2017/'
-# data_root = './data/urpc2020/ '
-# train_ann = './data/urpc2020/annotations/instances_train.json'
-# test_ann = './data/urpc2020/annotations/instances_test.json'
+# hq_img_prefix = '/home/xcx/桌面/ddpm/en-diff/data/enhance/'
+# data_root = '/home/xcx/桌面/ddpm/en-diff/data/mydata/'
+# train_ann = '/home/xcx/桌面/ddpm/en-diff/data/mydata/annotations/instances_train.json'
+# test_ann = '/home/xcx/桌面/ddpm/en-diff/data/mydata/annotations/instances_test.json'
+
 classes = [
     'anemone fish', 'coho', 'gar', 'leatherback turtle', 'rock beauty', 'stingray',
     'barracouta', 'conch', 'goldfish', 'lionfish', 'sea anemone', 'sturgeon',
@@ -132,9 +133,10 @@ classes = [
     'brain coral', 'eel', 'hammerhead', 'mud turtle', 'sea urchin', 'terrapin',
     'chiton', 'electric ray', 'jellyfish', 'puffer', 'starfish', 'tiger shark'
 ]
+
 data = dict(
     samples_per_gpu=2,
-    workers_per_gpu=4,
+    workers_per_gpu=16,
     train=dict(
         type=dataset_type,
         hq_img_prefix=hq_img_prefix,
@@ -159,10 +161,18 @@ data = dict(
         img_prefix=data_root+'images/',
         pipeline=test_pipeline
     ))
-evaluation = dict(interval=1, save_best='auto', classwise=True)
+
+checkpoint_config = dict(
+    interval=1,                # 每隔 1 个 epoch 保存一次检查点。
+    max_keep_ckpts=10,         # 关键参数：在工作目录中最多只保留最近的 10 个检查点文件。
+                               # 当保存第 11 个时，最早的那个会被自动删除。
+    save_last=True             # 推荐保留，确保最后一个 epoch 的检查点总会被保存。
+)
+
+evaluation = dict(interval=10, save_best='auto', classwise=True)
 
 optimizer = dict(
-    lr=0.0025,
+    lr=0.0002,
     paramwise_cfg=dict(
         custom_keys=dict(diffusion=dict(lr_mult=0.1, decay_mult=5.0))))
 
@@ -178,7 +188,9 @@ lr_config = dict(
     warmup_ratio=0.001,
     warmup_start=0)
 
-runner = dict(max_epochs=24)
+auto_scale_lr = dict(enable=True, base_batch_size=8)
+
+runner = dict(max_epochs=300)
 log_config = dict(
     interval=50,
     hooks=[dict(type='TextLoggerHook')])
@@ -188,3 +200,11 @@ custom_hooks = [
         type='TrainModeControlHook', train_modes=['sample', 'det'], num_epoch=[6, 6])
 ]
 fp16 = dict(loss_scale=512.0)
+
+find_unused_parameters = True
+# ====== 配置区域 ======
+# CONFIG_PATH = './config/EnDiff_r50_diff.py'
+# CHECKPOINT_PATH = './work_dirs/EnDiff_r50_diff/epoch_9.pth'
+# INPUT_DIR = '/media/HDD0/XCX/synthetic_dataset/images'
+# OUTPUT_DIR = '/media/HDD0/XCX/new_dataset'
+# ANNOTATION_PATH = '/media/HDD0/XCX/synthetic_dataset/annotations/split_results/part2.json'

@@ -12,7 +12,7 @@ model = dict(
         checkpoint='torchvision://resnet50'
     ),
     diff_cfg=dict(
-        type='EnDiff1',
+        type='EnDiff0',
         net=dict(type='PM', channels=16, time_channels=16),
         diffuse_ratio=0.6,
         sample_times=15,
@@ -161,6 +161,14 @@ data = dict(
         img_prefix=data_root+'images/',
         pipeline=test_pipeline
     ))
+
+checkpoint_config = dict(
+    interval=1,                # 每隔 1 个 epoch 保存一次检查点。
+    max_keep_ckpts=10,         # 关键参数：在工作目录中最多只保留最近的 10 个检查点文件。
+                               # 当保存第 11 个时，最早的那个会被自动删除。
+    save_last=True             # 推荐保留，确保最后一个 epoch 的检查点总会被保存。
+)
+
 evaluation = dict(interval=1, save_best='auto', classwise=True)
 
 optimizer = dict(

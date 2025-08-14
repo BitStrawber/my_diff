@@ -6,8 +6,8 @@ import os.path as osp
 import time
 import warnings
 
-import mmcv
 import torch
+import mmcv
 import torch.distributed as dist
 from mmcv import Config, DictAction
 from mmcv.runner import get_dist_info, init_dist
@@ -20,10 +20,13 @@ from mmdet.models import build_detector
 from mmdet.utils import (collect_env, get_device, get_root_logger,
                          replace_cfg_vals, setup_multi_processes,
                          update_data_root)
+import sys
+sys.path.append('./')
+from EnDiff import *
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='Train a diffusion model')
+    parser = argparse.ArgumentParser(description='Train a detector')
     parser.add_argument('config', help='train config file path')
     parser.add_argument('--work-dir', help='the dir to save logs and models')
     parser.add_argument(
@@ -41,19 +44,19 @@ def parse_args():
         '--gpus',
         type=int,
         help='(Deprecated, please use --gpu-id) number of gpus to use '
-             '(only applicable to non-distributed training)')
+        '(only applicable to non-distributed training)')
     group_gpus.add_argument(
         '--gpu-ids',
         type=int,
         nargs='+',
         help='(Deprecated, please use --gpu-id) ids of gpus to use '
-             '(only applicable to non-distributed training)')
+        '(only applicable to non-distributed training)')
     group_gpus.add_argument(
         '--gpu-id',
         type=int,
         default=0,
         help='id of gpu to use '
-             '(only applicable to non-distributed training)')
+        '(only applicable to non-distributed training)')
     parser.add_argument('--seed', type=int, default=None, help='random seed')
     parser.add_argument(
         '--diff-seed',
@@ -68,18 +71,18 @@ def parse_args():
         nargs='+',
         action=DictAction,
         help='override some settings in the used config, the key-value pair '
-             'in xxx=yyy format will be merged into config file (deprecate), '
-             'change to --cfg-options instead.')
+        'in xxx=yyy format will be merged into config file (deprecate), '
+        'change to --cfg-options instead.')
     parser.add_argument(
         '--cfg-options',
         nargs='+',
         action=DictAction,
         help='override some settings in the used config, the key-value pair '
-             'in xxx=yyy format will be merged into config file. If the value to '
-             'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
-             'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
-             'Note that the quotation marks are necessary and that no white space '
-             'is allowed.')
+        'in xxx=yyy format will be merged into config file. If the value to '
+        'be overwritten is a list, it should be like key="[a,b]" or key=a,b '
+        'It also allows nested list/tuple values, e.g. key="[(a,b),(c,d)]" '
+        'Note that the quotation marks are necessary and that no white space '
+        'is allowed.')
     parser.add_argument(
         '--launcher',
         choices=['none', 'pytorch', 'slurm', 'mpi'],
@@ -90,8 +93,19 @@ def parse_args():
         '--auto-scale-lr',
         action='store_true',
         help='enable automatically scaling LR.')
-    args = parser.parse_args()
+    parser.add_argument(
+        '--train-mode',
+        type=str,
+        default='both',
+        choices=['both', 'diff', 'det'],
+        help='训练模式选择: both(联合训练), diff(仅训练扩散模型), det(仅训练检测模型)')
+    parser.add_argument(
+        '--test-num',
+        type=float,
+        default=1.0,
+        help='multiplicative factor for uw_loss_weight in config')
 
+    args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
         os.environ['LOCAL_RANK'] = str(args.local_rank)
 
@@ -120,22 +134,17 @@ def main():
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
 
-    # 确保配置文件中没有检测相关的设置
-    if 'detector' in cfg.model or 'roi_head' in cfg.model:
-        warnings.warn('Detector related configurations found in the config file. '
-                      'These will be ignored for diffusion model training.')
-
-    # 自动调整学习率
     if args.auto_scale_lr:
         if 'auto_scale_lr' in cfg and \
                 'enable' in cfg.auto_scale_lr and \
                 'base_batch_size' in cfg.auto_scale_lr:
             cfg.auto_scale_lr.enable = True
-        else:
+        #else:
             warnings.warn('Can not find "auto_scale_lr" or '
                           '"auto_scale_lr.enable" or '
                           '"auto_scale_lr.base_batch_size" in your'
-                          ' configuration file.')
+                          ' configuration file. Please update all the '
+                          'configuration files to mmdet >= 2.24.1.')
 
     # set multi-process settings
     setup_multi_processes(cfg)
@@ -146,33 +155,49 @@ def main():
 
     # work_dir is determined in this priority: CLI > segment in file > filename
     if args.work_dir is not None:
+        # update configs according to CLI args if args.work_dir is not None
         cfg.work_dir = args.work_dir
     elif cfg.get('work_dir', None) is None:
-        cfg.work_dir = osp.join('./work_dirs_diff',
+        # use config filename as default work_dir if cfg.work_dir is None
+        cfg.work_dir = osp.join('./work_dirs',
                                 osp.splitext(osp.basename(args.config))[0])
 
     if args.resume_from is not None:
         cfg.resume_from = args.resume_from
     cfg.auto_resume = args.auto_resume
-
-    # GPU设置
     if args.gpus is not None:
         cfg.gpu_ids = range(1)
-        warnings.warn('`--gpus` is deprecated. Use `gpus=1` now.')
+        warnings.warn('`--gpus` is deprecated because we only support '
+                      'single GPU mode in non-distributed training. '
+                      'Use `gpus=1` now.')
     if args.gpu_ids is not None:
         cfg.gpu_ids = args.gpu_ids[0:1]
-        warnings.warn('`--gpu-ids` is deprecated, please use `--gpu-id`.')
+        warnings.warn('`--gpu-ids` is deprecated, please use `--gpu-id`. '
+                      'Because we only support single GPU mode in '
+                      'non-distributed training. Use the first GPU '
+                      'in `gpu_ids` now.')
     if args.gpus is None and args.gpu_ids is None:
         cfg.gpu_ids = [args.gpu_id]
+
+    if args.train_mode == 'diff':
+        cfg.custom_hooks[1]['train_modes'] = ['sample']
+        cfg.custom_hooks[1]['num_epoch'] = [12]
+    elif args.train_mode == 'det':
+        cfg.custom_hooks[1]['train_modes'] = ['det']
+        cfg.custom_hooks[1]['num_epoch'] = [12]
 
     # init distributed env first, since logger depends on the dist info.
     if args.launcher == 'none':
         distributed = False
     else:
         distributed = True
+        # 修改1: 在init_dist前设置正确的设备
+        torch.cuda.set_device(args.local_rank)
         init_dist(args.launcher, **cfg.dist_params)
+        # 修改2: 添加初始化后的同步
+        dist.barrier()
         # re-set gpu_ids with distributed training mode
-        _, world_size = get_dist_info()
+        rank, world_size = get_dist_info()
         cfg.gpu_ids = range(world_size)
 
     # create work_dir
@@ -183,6 +208,12 @@ def main():
     timestamp = time.strftime('%Y%m%d_%H%M%S', time.localtime())
     log_file = osp.join(cfg.work_dir, f'{timestamp}.log')
     logger = get_root_logger(log_file=log_file, log_level=cfg.log_level)
+
+    if hasattr(cfg.model, 'diff_cfg') and 'uw_loss_weight' in cfg.model.diff_cfg:
+        original_weight = cfg.model.diff_cfg['uw_loss_weight']
+        cfg.model.diff_cfg['uw_loss_weight'] = original_weight * args.test_num
+        logger.info(
+            f'Adjusted uw_loss_weight: {original_weight} * {args.test_num} = {cfg.model.diff_cfg["uw_loss_weight"]}')
 
     # init the meta dict to record some important information such as
     # environment info and seed, which will be logged
@@ -201,38 +232,44 @@ def main():
 
     cfg.device = get_device()
     # set random seeds
+    cfg.device = get_device()
     seed = init_random_seed(args.seed, device=cfg.device)
-    seed = seed + dist.get_rank() if args.diff_seed else seed
-    logger.info(f'Set random seed to {seed}, '
-                f'deterministic: {args.deterministic}')
+    if distributed:
+        seed = seed + get_rank() if args.diff_seed else seed
+    logger.info(f'Set random seed to {seed}, deterministic: {args.deterministic}')
     set_random_seed(seed, deterministic=args.deterministic)
     cfg.seed = seed
     meta['seed'] = seed
     meta['exp_name'] = osp.basename(args.config)
 
-    # build model - 这里会构建你的扩散模型
     model = build_detector(
         cfg.model,
         train_cfg=cfg.get('train_cfg'),
         test_cfg=cfg.get('test_cfg'))
     model.init_weights()
 
-    # build dataset - 使用你的HqLqCocoDataset
-    datasets = [build_dataset(cfg.data.train)]
+    # 【核心修改】移除手动DDP封装！train_detector会处理
+    # MMDetection的train_detector会检查distributed标志，并使用MMDistributedDataParallel自动封装模型。
+    # MMDistributedDataParallel 默认就会处理 find_unused_parameters 的问题。
+    # 你只需要在配置文件中确保DDP的配置是正确的。
+    # 例如，在config文件中加入 find_unused_parameters=True
+    # cfg.find_unused_parameters = True
+    # 或者直接在命令行传入 --cfg-options find_unused_parameters=True
 
-    # 验证集设置
+    datasets = [build_dataset(cfg.data.train)]
     if len(cfg.workflow) == 2:
         val_dataset = copy.deepcopy(cfg.data.val)
         val_dataset.pipeline = cfg.data.train.pipeline
         datasets.append(build_dataset(val_dataset))
-
-    # checkpoint配置
     if cfg.checkpoint_config is not None:
+        # save mmdet version, config file content and class names in
+        # checkpoints as meta data
         cfg.checkpoint_config.meta = dict(
             mmdet_version=__version__ + get_git_hash()[:7],
             CLASSES=datasets[0].CLASSES)
+    # add an attribute for visualization convenience
+    model.CLASSES = datasets[0].CLASSES
 
-    # 训练扩散模型
     train_detector(
         model,
         datasets,
