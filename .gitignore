@@ -1,0 +1,24 @@
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 模型权重和数据
+*.pth
+*.pkl
+*.ckpt
+
+# 日志文件
+*.log
+log/
+
+# 工作目录和输出
+work_dirs/
+output/
+results/
+
+# 临时文件
+view?usp=drive_link
+.DS_Store
