@@ -19,7 +19,7 @@ num_classes = 10
 model = dict(
     init_cfg=dict(
         type='Pretrained',
-        checkpoint='./work_dirs/compare/epoch_24.pth'
+        checkpoint='trochvision://resnet50'
     ),
     roi_head=dict(
         bbox_head=[
@@ -75,11 +75,11 @@ model = dict(
                 loss_bbox=dict(type='SmoothL1Loss', beta=1.0, loss_weight=1.0))
         ])
 )
-gpu_num = 3
+gpu_num = 2
 gpu_ids = range(gpu_num)
 
 data = dict(
-    samples_per_gpu=2,
+    samples_per_gpu=8,
     workers_per_gpu=4,
     train=dict(
         ann_file=train_ann,
@@ -100,5 +100,5 @@ data = dict(
 
 # 其他自定义参数
 evaluation = dict(interval=1, save_best='auto', classwise=True)
-optimizer = dict(type='SGD', lr=0.02*gpu_num, momentum=0.9, weight_decay=0.0001)
+optimizer = dict(type='SGD', lr=0.02, momentum=0.9, weight_decay=0.0001)
 runner = dict(type='EpochBasedRunner', max_epochs=24)
