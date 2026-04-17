@@ -4,10 +4,10 @@ _base_ = [
     './_base_/default_runtime.py'
 ]
 
-# RUOD dataset
-data_root = '/media/HDD0/XCX/RUOD_pic/'
-train_ann = '/media/HDD0/XCX/RUOD_ANN/instances_train.json'
-test_ann = '/media/HDD0/XCX/RUOD_ANN/instances_test.json'
+# RUOD dataset - 修改为你的实际路径
+data_root = '/path/to/data/RUOD_pic/'
+train_ann = '/path/to/data/RUOD_ANN/instances_train.json'
+test_ann = '/path/to/data/RUOD_ANN/instances_test.json'
 classes = [
     'holothurian', 'echinus', 'scallop', 'starfish', 'fish', 'corals',
     'diver', 'cuttlefish', 'turtle', 'jellyfish'

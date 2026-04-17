@@ -5,8 +5,8 @@ _base_ = [
     './_base_/default_runtime.py'
 ]
 
-# Enhanced COCO dataset (UWNR output)
-data_root = '/media/HDD0/XCX/coco_uwnr/'
+# Enhanced COCO dataset (UWNR output) - 修改为你的实际路径
+data_root = '/path/to/data/coco_uwnr/'
 train_ann = data_root + 'annotations/instances_train50k_uwnr.json'
 test_ann = data_root + 'annotations/instances_val.json'
 num_classes = 80
